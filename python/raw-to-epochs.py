@@ -166,8 +166,59 @@ if MODE == 'EEG':
 
 epochs.filter(l_freq=l_freq, h_freq=h_freq, n_jobs=n_jobs)
 
+# Generate epochs
+tmin, tmax = -0.5, 1.5
+l_freq, h_freq = 0.1, 40
+
+if MODE == 'MEG':
+    reject = dict(
+        mag=4e-12,      # unit: T (magnetometers)
+    )
+elif MODE == 'EEG':
+    reject = dict(
+        # eeg=40e-6,      # unit: V (EEG channels)
+    )
+else:
+    raise ValueError(f'Incorrect {MODE=}')
+
+# Ready to generate epochs
+# Also downsample by decimating the data to 200 Hz to reduce memory usage and speed up processing
+epochs = mne.Epochs(
+    raw, events, event_id,
+    tmin=tmin, tmax=tmax,
+    decim=int(raw.info['sfreq'] / 200),
+    reject=reject,
+)
+
+# Only interested in 1, 2, 3 events
+epochs = mne.concatenate_epochs([epochs['1'], epochs['2'], epochs['3']])
+logger.debug(f'Generated {epochs=}')
+
+# It may take long since the epochs are so many
+epochs.load_data()
+
+# For EEG data, set the average reference
+if MODE == 'EEG':
+    epochs = epochs.set_eeg_reference(ref_channels='average')
+
+epochs.filter(l_freq=l_freq, h_freq=h_freq, n_jobs=n_jobs)
+
 # %% ---- 2026-08-25 ------------------------
-# Pending
+# Save epochs for 1, 2, 3 events separately
+# Plot and save evoked
+for evt in ['1', '2', '3']:
+    fname = OUTPUT_DIR / f'epochs-{evt}-epo.fif'
+    epochs[evt].save(fname, overwrite=True)
+    logger.debug(f'Saved {fname=}, {epochs[evt]=}')
+
+    fname = OUTPUT_DIR / f'epochs-{evt}-ave.fif'
+    evoked = epochs[evt].average()
+    evoked.save(fname, overwrite=True)
+    logger.debug(f'Saved {fname=}')
+
+    fig = evoked.plot_joint(title=f'{evt=}', show=False)
+    fig.savefig(fname.with_suffix('.png'))
+    plt.close(fig)
 
 
 # %% ---- 2026-08-25 ------------------------

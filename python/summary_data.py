@@ -18,7 +18,7 @@ Functions:
 
 # %% ---- 2026-01-26 ------------------------
 # Requirements and constants
-from .util.easy_imports import *
+from util.easy_imports import *
 
 
 # %% ---- 2026-01-26 ------------------------
@@ -50,6 +50,8 @@ def summarize_dataset(data_path: Path) -> pd.DataFrame:
 
 # %% ---- 2026-01-26 ------------------------
 # Play ground
+if __name__ == '__main__':
+    display(summarize_dataset('./rawData/RSVP_dataset/processed_data'))
 
 
 # %% ---- 2026-01-26 ------------------------

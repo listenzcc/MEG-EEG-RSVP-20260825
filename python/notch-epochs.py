@@ -1,5 +1,5 @@
 """
-File: plot-erp.py
+File: notch-epochs.py
 Author: Chuncheng Zhang
 Date: 2026-08-26
 Copyright & Email: chuncheng.zhang@ia.ac.cn

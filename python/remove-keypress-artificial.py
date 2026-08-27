@@ -44,7 +44,7 @@ OUTPUT_DIR = DATA_DIR
 # %% ---- 2026-08-26 ------------------------
 # Play ground
 if MODE == 'EEG':
-    kwargs = dict(n_grad=0, n_mag=0, n_eeg=1)
+    kwargs = dict(n_grad=0, n_mag=0, n_eeg=2)
 elif MODE == 'MEG':
     kwargs = dict(n_grad=0, n_mag=3, n_eeg=0)
 

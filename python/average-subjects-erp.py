@@ -47,10 +47,10 @@ for evt, flag_removal_artificial in product(['1', '2', '3'], [True, False]):
 
     if flag_removal_artificial:
         pattern = f'{MODE}-S*/epochs-{evt}-notch-removal-artificial-ave.fif'
-        fname = OUTPUT_DIR / f'{evt}-notch-ave.png'
+        fname = OUTPUT_DIR / f'{evt}-notch-removal-artificial-ave.png'
     else:
         pattern = f'{MODE}-S*/epochs-{evt}-notch-ave.fif'
-        fname = OUTPUT_DIR / f'{evt}-notch-removal-artificial-ave.png'
+        fname = OUTPUT_DIR / f'{evt}-notch-ave.png'
 
     logger.debug(f'Find files by {pattern=}')
     files = sorted(DATA_DIR.rglob(pattern))

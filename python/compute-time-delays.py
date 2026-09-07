@@ -136,8 +136,14 @@ plt.xlabel('Delay (s)')
 plt.title('Distribution of Delays between Target and Keypress Events')
 plt.savefig(OUTPUT_DIR / 'timeDelays-keypress.png')
 plt.close()
-# plt.show()
 
+fig, ax = plt.subplots(figsize=(24, 12))
+sns.violinplot(df, x='subject', y='delay', hue='mode', ax=ax)
+plt.title('Violinplot of Delays between Target and Keypress Events')
+plt.savefig(OUTPUT_DIR / 'timeDelays-keypress-detail.png')
+plt.close()
+
+# %%
 df = df_target.copy()
 df = df[df['delay'] < 1]  # Filter out delays greater than 1 second
 sns.histplot(df, x='delay', hue='mode', element='step',
@@ -146,7 +152,12 @@ plt.xlabel('Delay (s)')
 plt.title('Distribution of Delays between Target and Keypress Events')
 plt.savefig(OUTPUT_DIR / 'timeDelays-target.png')
 plt.close()
-# plt.show()
+
+fig, ax = plt.subplots(figsize=(24, 12))
+sns.violinplot(df, x='subject', y='delay', hue='mode', ax=ax)
+plt.title('Violinplot of Delays between Target and Keypress Events')
+plt.savefig(OUTPUT_DIR / 'timeDelays-target-detail.png')
+plt.close()
 
 # %%
 

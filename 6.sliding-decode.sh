@@ -9,28 +9,29 @@ which python
 python --version
 
 script=./python/sliding-decode.py
-
+# argA=
+argA=-a
 
 mode=EEG
-python $script --subject S01 --mode $mode
-python $script --subject S02 --mode $mode
-python $script --subject S03 --mode $mode
-python $script --subject S04 --mode $mode
-python $script --subject S05 --mode $mode
-python $script --subject S06 --mode $mode
-python $script --subject S07 --mode $mode
-python $script --subject S08 --mode $mode
-python $script --subject S09 --mode $mode
-python $script --subject S10 --mode $mode
+python $script --subject S01 --mode $mode $argA
+python $script --subject S02 --mode $mode $argA
+python $script --subject S03 --mode $mode $argA
+python $script --subject S04 --mode $mode $argA
+python $script --subject S05 --mode $mode $argA
+python $script --subject S06 --mode $mode $argA
+python $script --subject S07 --mode $mode $argA
+python $script --subject S08 --mode $mode $argA
+python $script --subject S09 --mode $mode $argA
+python $script --subject S10 --mode $mode $argA
 
 mode=MEG
-python $script --subject S01 --mode $mode
-python $script --subject S02 --mode $mode
-python $script --subject S03 --mode $mode
-python $script --subject S04 --mode $mode
-python $script --subject S05 --mode $mode
-python $script --subject S06 --mode $mode
-python $script --subject S07 --mode $mode
-python $script --subject S08 --mode $mode
-python $script --subject S09 --mode $mode
-python $script --subject S10 --mode $mode
+python $script --subject S01 --mode $mode $argA
+python $script --subject S02 --mode $mode $argA
+python $script --subject S03 --mode $mode $argA
+python $script --subject S04 --mode $mode $argA
+python $script --subject S05 --mode $mode $argA
+python $script --subject S06 --mode $mode $argA
+python $script --subject S07 --mode $mode $argA
+python $script --subject S08 --mode $mode $argA
+python $script --subject S09 --mode $mode $argA
+python $script --subject S10 --mode $mode $argA

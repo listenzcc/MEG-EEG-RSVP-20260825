@@ -32,14 +32,18 @@ parser = argparse.ArgumentParser(
 parser.add_argument('-s', '--subject', default='S02',
                     help='Subject name like S02')
 parser.add_argument('-m', '--mode', default='EEG', help='Mode name EEG | MEG')
+parser.add_argument('-a', '--flag-remove-artificial', action='store_true', help='using the remove-artificial-epochs')
 args = parser.parse_args()
 SUBJ = args.subject
 MODE = args.mode
+FLAG_REMOVE_ARTIFICIAL = args.flag_remove_artificial
+print(args)
 
-logger.info(f'Start with {SUBJ=}, {MODE=}')
+logger.info(f'Start with {args=}')
 
 # %%
 DATA_DIR = Path(f'output/epochs/{MODE}-{SUBJ}')
+
 OUTPUT_DIR = Path(f'output/sliding-decode/{MODE}-{SUBJ}')
 OUTPUT_DIR.mkdir(exist_ok=True, parents=True)
 
@@ -51,8 +55,14 @@ OUTPUT_DIR.mkdir(exist_ok=True, parents=True)
 # %% ---- 2026-09-07 ------------------------
 # Play ground
 # Target (1) vs Non-target (2)
-epochs_1 = mne.read_epochs(DATA_DIR / 'epochs-1-notch-epo.fif')
-epochs_2 = mne.read_epochs(DATA_DIR / 'epochs-2-notch-epo.fif')
+
+if FLAG_REMOVE_ARTIFICIAL:
+    epochs_1 = mne.read_epochs(DATA_DIR / 'epochs-1-notch-removal-artificial-epo.fif')
+    epochs_2 = mne.read_epochs(DATA_DIR / 'epochs-2-notch-removal-artificial-epo.fif')
+else:
+    epochs_1 = mne.read_epochs(DATA_DIR / 'epochs-1-notch-epo.fif')
+    epochs_2 = mne.read_epochs(DATA_DIR / 'epochs-2-notch-epo.fif')
+
 # epochs_3 = mne.read_epochs(DATA_DIR / 'epochs-3-notch-epo.fif')
 epochs_all = mne.concatenate_epochs([epochs_1, epochs_2])
 print(epochs_all)
@@ -96,7 +106,10 @@ print(scores)
 print(scores_mean)
 print(scores.shape)  # (n_splits, n_times)
 
-scores_path = OUTPUT_DIR / 'scores.txt'
+if FLAG_REMOVE_ARTIFICIAL:
+    scores_path = OUTPUT_DIR / 'scores-rma.txt'
+else:
+    scores_path = OUTPUT_DIR / 'scores.txt'
 np.savetxt(scores_path, scores, fmt='%.6f')
 logger.info(f'Saved scores to {scores_path}')
 

@@ -11,6 +11,7 @@ python --version
 script=./python/sliding-decode.py
 decoding_method=LR
 argA=
+argA=-a
 
 mode=EEG
 python $script --subject S01 --mode $mode $argA --decoding_method $decoding_method
@@ -35,5 +36,3 @@ python $script --subject S07 --mode $mode $argA --decoding_method $decoding_meth
 python $script --subject S08 --mode $mode $argA --decoding_method $decoding_method
 python $script --subject S09 --mode $mode $argA --decoding_method $decoding_method
 python $script --subject S10 --mode $mode $argA --decoding_method $decoding_method
-
-argA=-a

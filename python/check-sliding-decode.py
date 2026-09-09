@@ -17,7 +17,7 @@ MODES = ['EEG', 'MEG']
 RMA = ['withoutRMA', 'withRMA']
 DECOD = ['SVC', 'LR']
 
-fig, ax = plt.subplots(1, 1, figsize=(12, 8))
+fig, axes = plt.subplots(1, 2, figsize=(12, 6))
 
 for _mode, _rma, _decod in product(MODES, RMA, DECOD):
     scores = []
@@ -42,13 +42,19 @@ for _mode, _rma, _decod in product(MODES, RMA, DECOD):
     scores = np.vstack(scores)
     print(scores.shape)
 
+    ax = axes[MODES.index(_mode)]
     ax.plot(
         times,
         np.mean(scores, axis=0),
         label=f'{_mode}-{_rma}-{_decod}',
         alpha=0.8)
 
-ax.legend()
+for ax in axes:
+    ax.legend()
+    ax.set_ylim([0.4, 1.0])
+    ax.axvline(0, color='k', linestyle='--', alpha=0.5)
+
+fig.tight_layout()
 plt.show()
 
 # %%

@@ -18,6 +18,7 @@ Functions:
 
 # %% ---- 2026-09-07 ------------------------
 # Requirements and constants
+from sklearn.linear_model import LogisticRegression
 from sklearn.svm import SVC
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
@@ -32,11 +33,17 @@ parser = argparse.ArgumentParser(
 parser.add_argument('-s', '--subject', default='S02',
                     help='Subject name like S02')
 parser.add_argument('-m', '--mode', default='EEG', help='Mode name EEG | MEG')
-parser.add_argument('-a', '--flag-remove-artificial', action='store_true', help='using the remove-artificial-epochs')
+parser.add_argument('-a', '--flag-remove-artificial',
+                    action='store_true', help='using the remove-artificial-epochs')
+parser.add_argument('-d', '--decoding_method', default='SVC',
+                    help='Decoding method like SVC | LR')
+
 args = parser.parse_args()
 SUBJ = args.subject
 MODE = args.mode
 FLAG_REMOVE_ARTIFICIAL = args.flag_remove_artificial
+DECODING_METHOD = args.decoding_method
+
 print(args)
 
 logger.info(f'Start with {args=}')
@@ -44,7 +51,7 @@ logger.info(f'Start with {args=}')
 # %%
 DATA_DIR = Path(f'output/epochs/{MODE}-{SUBJ}')
 
-OUTPUT_DIR = Path(f'output/sliding-decode/{MODE}-{SUBJ}')
+OUTPUT_DIR = Path(f'output/sliding-decode/{MODE}-{SUBJ}-{DECODING_METHOD}')
 OUTPUT_DIR.mkdir(exist_ok=True, parents=True)
 
 
@@ -57,8 +64,10 @@ OUTPUT_DIR.mkdir(exist_ok=True, parents=True)
 # Target (1) vs Non-target (2)
 
 if FLAG_REMOVE_ARTIFICIAL:
-    epochs_1 = mne.read_epochs(DATA_DIR / 'epochs-1-notch-removal-artificial-epo.fif')
-    epochs_2 = mne.read_epochs(DATA_DIR / 'epochs-2-notch-removal-artificial-epo.fif')
+    epochs_1 = mne.read_epochs(
+        DATA_DIR / 'epochs-1-notch-removal-artificial-epo.fif')
+    epochs_2 = mne.read_epochs(
+        DATA_DIR / 'epochs-2-notch-removal-artificial-epo.fif')
 else:
     epochs_1 = mne.read_epochs(DATA_DIR / 'epochs-1-notch-epo.fif')
     epochs_2 = mne.read_epochs(DATA_DIR / 'epochs-2-notch-epo.fif')
@@ -76,16 +85,23 @@ y = epochs_all.events[:, -1]  # 标签 1,2,3,4 ...
 times = epochs_all.times  # 时间点
 
 # 分类器（每个时间点都会用）
-clf = make_pipeline(
-    Vectorizer(),          # (n_channels, n_times) → (features)
-    StandardScaler(),
-    SVC(kernel='rbf')
-)
+if DECODING_METHOD == 'SVC':
+    clf = make_pipeline(
+        Vectorizer(),          # (n_channels, n_times) → (features)
+        StandardScaler(),
+        SVC(kernel='rbf')
+    )
+elif DECODING_METHOD == 'LR':
+    clf = make_pipeline(
+        Vectorizer(),          # (n_channels, n_times) → (features)
+        StandardScaler(),
+        LogisticRegression()
+    )
 
 time_decod = SlidingEstimator(
     clf,
     scoring='roc_auc',
-    n_jobs=-1
+    n_jobs=n_jobs
 )
 
 # 10-fold CV
@@ -96,7 +112,7 @@ scores = cross_val_multiscore(
     X,
     y,
     cv=cv,
-    n_jobs=-1
+    n_jobs=n_jobs
 )
 
 # 平均 across folds

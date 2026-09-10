@@ -40,7 +40,6 @@ for _mode, _rma, _decod in product(MODES, RMA, DECOD):
         continue
 
     scores = np.vstack(scores)
-    print(scores.shape)
 
     ax = axes[MODES.index(_mode)]
     ax.plot(

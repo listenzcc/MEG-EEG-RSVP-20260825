@@ -6,7 +6,11 @@ from util.easy_imports import *
 DATA_DIR = Path('output/sliding-decode')
 
 # IPython
-DATA_DIR = Path('../output/sliding-decode')
+try:
+    __IPYTHON__
+    DATA_DIR = Path('../output/sliding-decode')
+except:
+    pass
 
 # %%
 times = np.linspace(-0.5, 1.5, 401)

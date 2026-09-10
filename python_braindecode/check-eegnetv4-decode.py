@@ -17,22 +17,24 @@ for folder in DATA_DIR.iterdir():
     if not folder.is_dir():
         continue
 
-    mode, subj, decod = folder.name.split('-')
+    mode, subj, decod = folder.name.split('-', 2)
 
     if (folder / 'metrics.json').exists():
         with open(folder / 'metrics.json', 'r') as f:
             metrics = json.load(f)
-        print(metrics)
         buffer.append(metrics)
+print(metrics)
 
 df = pd.DataFrame(buffer)
-print(df)
+display(df.head())
 
 group = df.groupby(['mode', 'decoding_method']).agg(
     {'balanced_accuracy': ['mean', 'std']})
-print(group)
+display(group)
 
 sns.boxplot(data=df, x='mode', y='balanced_accuracy', hue='decoding_method')
 plt.show()
+
+# %%
 
 # %%

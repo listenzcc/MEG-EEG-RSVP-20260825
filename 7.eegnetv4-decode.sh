@@ -11,7 +11,7 @@ python --version
 script=./python_braindecode/eegnetv4-decode.py
 decoding_method=EEGNetV4
 argA=
-# argA=-a
+argA=-a
 
 mode=EEG
 python $script --subject S01 --mode $mode $argA --decoding_method $decoding_method

@@ -51,17 +51,16 @@ MODE = args.mode
 FLAG_REMOVE_ARTIFICIAL = args.flag_remove_artificial
 DECODING_METHOD = args.decoding_method
 
+if FLAG_REMOVE_ARTIFICIAL:
+    DECODING_METHOD += '-RA'
+
 print(args)
 
 # %%
 DATA_DIR = Path(f'output/epochs/{MODE}-{SUBJ}')
 
-if FLAG_REMOVE_ARTIFICIAL:
-    OUTPUT_DIR = Path(
-        f'output/neuralnetwork-decode/{MODE}-{SUBJ}-{DECODING_METHOD}-RA')
-else:
-    OUTPUT_DIR = Path(
-        f'output/neuralnetwork-decode/{MODE}-{SUBJ}-{DECODING_METHOD}')
+OUTPUT_DIR = Path(
+    f'output/neuralnetwork-decode/{MODE}-{SUBJ}-{DECODING_METHOD}')
 
 OUTPUT_DIR.mkdir(exist_ok=True, parents=True)
 
@@ -216,11 +215,6 @@ np.savez(
 # ============================================================
 # EEGNetV4
 # ============================================================
-
-if DECODING_METHOD != 'EEGNetV4':
-    raise ValueError(
-        f'Unsupported decoding method: {DECODING_METHOD}'
-    )
 
 model = EEGNetv4(
     n_chans=n_channels,

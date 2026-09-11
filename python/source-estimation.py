@@ -37,8 +37,6 @@ SUBJ = args.subject
 MODE = args.mode
 EPOCHS_FNAME = args.epochs_fname
 
-print(args)
-
 logger.info(f'Start with {args=}')
 
 # %%

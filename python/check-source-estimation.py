@@ -26,10 +26,16 @@ parser = argparse.ArgumentParser(
 parser.add_argument('-m', '--mode', default='MEG', help='Mode name EEG | MEG')
 parser.add_argument('-e', '--epochs_fname', default='epochs-1-notch-epo.fif',
                     help='Epochs fname, it should be inside the $DATA_DIR')
+parser.add_argument('-t', '--tag', default='ave',
+                    help='ave | ssvep10-evoked | ssvep10-power')
+parser.add_argument('-s', '--subject', default='*',
+                    help='Subject name like S02, all subjects by default')
 
 args = parser.parse_args()
 MODE = args.mode
 EPOCHS_FNAME = args.epochs_fname
+TAG = args.tag
+SUBJ = args.subject
 
 logger.info(f'Start with {args=}')
 
@@ -42,7 +48,10 @@ DATA_DIR = Path('./output/source-estimation')
 
 # %% ---- 2026-09-11 ------------------------
 # Play ground
-stc_files = sorted(DATA_DIR.rglob(f'{MODE}-*/{EPOCHS_FNAME}.ave.stc-lh.stc'))
+stc_files = sorted(DATA_DIR.rglob(
+    f'{MODE}-{SUBJ}/{EPOCHS_FNAME}.{TAG}.stc-lh.stc'))
+
+assert len(stc_files) > 0, f'No stc file is found, {DATA_DIR=}, {MODE=}, {EPOCHS_FNAME=}, {TAG=}'
 
 stcs = [mne.read_source_estimate(p.parent / p.name.replace('-lh.stc', ''))
         for p in stc_files]
@@ -53,9 +62,6 @@ print(stcs)
 # data shape is (n_stcs, n_verts, n_times)
 data = np.array([stc.data for stc in stcs])
 mean_data = np.mean([stc.data for stc in stcs], axis=0)
-
-mean = data.mean(axis=0, keepdims=True)   # (1, n_verts, n_times)
-std = data.std(axis=0, keepdims=True)    # (1, n_verts, n_times)
 
 mean = data.mean()
 std = data.std()

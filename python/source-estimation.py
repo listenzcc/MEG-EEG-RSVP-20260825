@@ -16,6 +16,11 @@ Purpose:
     notched epochs can not be used for the 10 Hz SSVEP and this script refuses
     them.
 
+    The power of the component in the source space is estimated on the evoked by
+    default, it needs one inverse solution only. With --trial_power it is
+    estimated trial by trial, which also keeps the induced part of the component
+    at the cost of one inverse solution per trial.
+
 Functions:
     1. Requirements and constants
     2. Function and class
@@ -51,7 +56,9 @@ parser.add_argument('--ssvep_bw', type=float, default=1.,
 parser.add_argument('--ssvep_min_ratio', type=float, default=1.5,
                     help='Minimal band to neighbour power ratio to accept the epochs as containing the component')
 parser.add_argument('--no_power', action='store_true',
-                    help='Skip the trial-wise power estimate of the component')
+                    help='Skip the power estimate of the component')
+parser.add_argument('--trial_power', action='store_true',
+                    help='Estimate the power trial by trial, it also keeps the induced part of the component but it is much slower')
 
 # The inverse solution
 parser.add_argument('--snr', type=float, default=3.,
@@ -228,29 +235,63 @@ def extract_component(epochs, freq, bw):
     return epochs_band
 
 
-def component_power_stc(epochs, inverse_operator, lambda2, fname_mean, fname_std):
+def component_power_stc(data, inverse_operator, lambda2, fname_mean,
+                        fname_std=None):
     '''
-    Estimate the trial wise power of the component in the source space.
+    Estimate the power of the component in the source space.
 
-    Each single trial, which is already band passed at the component frequency,
-    is projected into the source space, the Hilbert envelope of the source time
-    course is computed, and the envelopes are averaged across the trials.
-    The result is the power of the component on each source, it does not require
-    the component to be phase locked across the trials.
+    The result is the Hilbert envelope of the component in the source space, it
+    is the power of the component on each source.
+
+    There are two ways to get it, the Evoked input is the default one:
+
+    - Evoked (fast): the trials are averaged first, then the average is
+      projected into the source space and the envelope of the source time course
+      is computed. Only one inverse solution is needed, so it is orders of
+      magnitude faster than the trial wise version. The kept part of the
+      component is the phase locked one, the trial wise (induced) part has been
+      averaged out before the projection.
+    - Epochs (slow, --trial_power): every single trial is projected, the
+      envelope is computed per trial and the envelopes are averaged. The trial
+      wise part of the component is kept as well, but it costs one inverse
+      solution per trial.
+
+    The values of the two versions are not directly comparable, the trial wise
+    one is larger whenever the component is not perfectly phase locked.
 
     Args:
-        epochs: MNE Epochs in the component band
+        data: MNE Evoked or Epochs in the component band
         inverse_operator: The inverse operator
         lambda2: The regularization of the inverse solution
         fname_mean: The fname of the averaged envelope
-        fname_std: The fname of the deviation of the envelope
+        fname_std: The fname of the deviation of the envelope across the trials,
+            it is only written for the Epochs input
 
     Returns:
-        mean, std: The averaged envelope and its deviation across the trials
+        mean, std: The averaged envelope and its deviation across the trials,
+            the deviation is None for the Evoked input
     '''
+    if isinstance(data, mne.Evoked):
+        stc = apply_inverse(
+            data, inverse_operator, lambda2=lambda2,
+            method=METHOD, pick_ori=PICK_ORI, verbose='ERROR')
+        envelope = stc.apply_hilbert(envelope=True).data.astype(np.float64)
+
+        stc_mean = stc.copy()
+        stc_mean.data = envelope
+        stc_mean.save(fname_mean, overwrite=True)
+        logger.debug(f'Saved into {fname_mean}, from the {data=}')
+
+        if fname_std is not None:
+            logger.info(
+                'The Evoked input does not provide the deviation across the '
+                'trials, use --trial_power to get the power-std file.')
+
+        return envelope, None
+
     total, square, template, n_trials = None, None, None, 0
     for stc in apply_inverse_epochs(
-            epochs, inverse_operator, lambda2,
+            data, inverse_operator, lambda2,
             method=METHOD, pick_ori=PICK_ORI,
             return_generator=True, verbose='ERROR'):
         envelope = stc.apply_hilbert(envelope=True).data.astype(np.float64)
@@ -273,10 +314,11 @@ def component_power_stc(epochs, inverse_operator, lambda2, fname_mean, fname_std
     stc_mean.save(fname_mean, overwrite=True)
     logger.debug(f'Saved into {fname_mean}, {n_trials=}')
 
-    stc_std = template.copy()
-    stc_std.data = std
-    stc_std.save(fname_std, overwrite=True)
-    logger.debug(f'Saved into {fname_std}')
+    if fname_std is not None:
+        stc_std = template.copy()
+        stc_std.data = std
+        stc_std.save(fname_std, overwrite=True)
+        logger.debug(f'Saved into {fname_std}')
 
     return mean, std
 
@@ -421,12 +463,17 @@ stc.save(FNAME_STC, overwrite=True)
 logger.debug(f'Saved into {FNAME_STC}')
 
 # 8. 提取成分在源空间的功率
-# 逐试次投影后取Hilbert包络再平均，得到的是该频率成分的功率，与试次间的相位无关
+# 默认在evoked上算（一次逆解，快）；
+# 加--trial_power则逐试次投影后取Hilbert包络再平均，额外得到与试次相位无关的功率，但慢得多
 if SSVEP_FREQ is not None and not args.no_power:
     FNAME_POWER = OUTPUT_DIR / f'{EPOCHS_FNAME}.{TAG}-power.stc'
     FNAME_POWER_STD = OUTPUT_DIR / f'{EPOCHS_FNAME}.{TAG}-power-std.stc'
-    component_power_stc(
-        epochs, inverse_operator, lambda2, FNAME_POWER, FNAME_POWER_STD)
+    if args.trial_power:
+        component_power_stc(
+            epochs, inverse_operator, lambda2, FNAME_POWER, FNAME_POWER_STD)
+    else:
+        component_power_stc(
+            evoked, inverse_operator, lambda2, FNAME_POWER)
 
 # %% ---- 2026-09-11 ------------------------
 # Pending

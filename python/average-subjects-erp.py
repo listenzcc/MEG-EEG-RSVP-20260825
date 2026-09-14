@@ -81,7 +81,6 @@ for evt, flag_removal_artificial, td in product(
             _fname = f'{mode}-{subj}/epochs-{evt}-notch-epo.fif'
 
         epochs = mne.read_epochs(DATA_DIR / _fname)
-        print(epochs)
 
         # evokeds += mne.read_evokeds(fname)
         # evoked = evokeds[0]

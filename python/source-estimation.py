@@ -32,12 +32,13 @@ Functions:
 
 # %% ---- 2026-09-11 ------------------------
 # Requirements and constants
-from scipy.signal import hilbert
 from mne.datasets import fetch_fsaverage
 from mne.minimum_norm import (make_inverse_operator, apply_inverse,
                               apply_inverse_epochs, write_inverse_operator)
 
 from util.easy_imports import *
+from util.ssvep_qc import (component_band_ratio, extract_component,
+                           save_component_qc_figure)
 
 # %%
 parser = argparse.ArgumentParser(
@@ -108,131 +109,9 @@ if SSVEP_FREQ is not None and 'notch' in EPOCHS_FNAME:
 
 # %% ---- 2026-09-11 ------------------------
 # Function and class
-def component_band_ratio(epochs, freq, bw):
-    '''
-    Measure whether the requested component is present in the epochs.
-
-    The spectrum is computed on the single trials, the power of the component
-    band [freq - bw, freq + bw] is compared with the neighbour bands
-    [freq - 4bw, freq - 2bw] and [freq + 2bw, freq + 4bw].
-    A ratio around 1 means the epochs do not contain the component, which is
-    the case when notch-epochs.py has already removed it, or when the epochs
-    are not aligned to the stimulus of the component.
-
-    Args:
-        epochs: MNE Epochs
-        freq: The central frequency of the component
-        bw: The half bandwidth of the component band
-
-    Returns:
-        psd: The spectrum of the epochs
-        ratio: The band to neighbour power ratio of each channel, (n_channels,)
-    '''
-    psd = epochs.compute_psd(
-        fmin=2., fmax=min(40., epochs.info['sfreq'] / 2. - 1.), verbose='ERROR')
-
-    freqs = psd.freqs
-    data = psd.get_data()
-    # The spectrum of the epochs is (n_epochs, n_channels, n_freqs)
-    if data.ndim == 3:
-        data = data.mean(axis=0)
-
-    band = (freqs >= freq - bw) & (freqs <= freq + bw)
-    neighbour = ((freqs >= freq - 4 * bw) & (freqs <= freq - 2 * bw)) | \
-        ((freqs >= freq + 2 * bw) & (freqs <= freq + 4 * bw))
-
-    ratio = np.median(data[:, band], axis=1) / \
-        np.median(data[:, neighbour], axis=1)
-    return psd, ratio
-
-
-def save_component_qc_figure(psd, evoked, ratio, freq, bw, fpath):
-    '''
-    Save the figure to check the component extraction.
-
-    The figure shows the spectrum of the epochs with the component band marked,
-    the topography of the component band power, and the band passed evoked of
-    the channel with the strongest component.
-
-    Args:
-        psd: The spectrum of the epochs, measured before the extraction
-        evoked: The band passed evoked
-        ratio: The band to neighbour power ratio of each channel
-        freq: The central frequency of the component
-        bw: The half bandwidth of the component band
-        fpath: The fname of the figure
-    '''
-    fig, axes = plt.subplots(1, 3, figsize=(22, 6))
-
-    psd.plot(axes=axes[0], show=False, spatial_colors=False)
-    axes[0].axvspan(freq - bw, freq + bw, color='tab:red', alpha=0.15)
-    axes[0].axvline(freq, color='tab:red', ls='--')
-    axes[0].set_title(f'Spectrum, {freq:g} Hz to neighbour power ratio: '
-                      f'median {np.median(ratio):.2f}, max {ratio.max():.2f}')
-
-    data = psd.get_data()
-    if data.ndim == 3:
-        data = data.mean(axis=0)
-    band = (psd.freqs >= freq - bw) & (psd.freqs <= freq + bw)
-    band_power = data[:, band].mean(axis=1)
-
-    mne.viz.plot_topomap(band_power, evoked.info, axes=axes[1],
-                         show=False, cmap='Reds', contours=3)
-    axes[1].set_title(f'{freq:g} Hz power')
-
-    # The channel with the strongest component
-    pick = int(np.argmax(band_power))
-    scale, unit = (1e15, 'fT') if MODE == 'MEG' else (1e6, 'uV')
-    axes[2].plot(evoked.times, evoked.data[pick] * scale, label='band passed')
-    axes[2].plot(evoked.times, np.abs(hilbert(evoked.data[pick])) * scale,
-                 label='Hilbert envelope')
-    axes[2].axvline(0, color='k', ls=':')
-    axes[2].set_xlabel('Time (s)')
-    axes[2].set_ylabel(f'Amplitude ({unit})')
-    axes[2].set_title(evoked.ch_names[pick])
-    axes[2].legend()
-
-    fig.tight_layout()
-    fig.savefig(fpath)
-    plt.close(fig)
-    logger.debug(f'Saved into {fpath}')
-
-
-def extract_component(epochs, freq, bw):
-    '''
-    Extract the requested component from the epochs with a zero phase band pass
-    filter.
-
-    The filter is applied to the single trials, so both the phase locked and the
-    trial wise part of the component are kept. It is zero phase, otherwise the
-    phase of the component is shifted and the average is not aligned to the
-    stimulus onset.
-
-    Args:
-        epochs: MNE Epochs
-        freq: The central frequency of the component
-        bw: The half bandwidth of the component band
-
-    Returns:
-        epochs_band: MNE Epochs in the [freq - bw, freq + bw] band
-    '''
-    data = mne.filter.filter_data(
-        epochs.get_data(copy=True),
-        sfreq=epochs.info['sfreq'],
-        l_freq=freq - bw,
-        h_freq=freq + bw,
-        method='iir',
-        iir_params=dict(order=4, ftype='butter', output='sos'),
-        n_jobs=n_jobs,
-        copy=False,
-        verbose='ERROR',
-    )
-
-    epochs_band = mne.EpochsArray(
-        data, epochs.info, epochs.events, epochs.times[0], epochs.event_id,
-        verbose='ERROR')
-    logger.debug(f'Extracted the {freq:g} Hz component, {epochs_band=}')
-    return epochs_band
+# component_band_ratio, extract_component and save_component_qc_figure come
+# from util/ssvep_qc.py, they are shared with python/ssvep-qc.py so the sensor
+# level QC and the source estimation always see the same component.
 
 
 def component_power_stc(data, inverse_operator, lambda2, fname_mean,
@@ -366,7 +245,7 @@ if SSVEP_FREQ is not None:
     fname = OUTPUT_DIR / f'{EPOCHS_FNAME}.{TAG}-qc.png'
     try:
         save_component_qc_figure(
-            psd, evoked, ratio, SSVEP_FREQ, SSVEP_BW, fname)
+            psd, evoked, ratio, SSVEP_FREQ, SSVEP_BW, fname, mode=MODE)
     except Exception as e:
         logger.warning(f'Failed to save the qc figure: {e}')
 

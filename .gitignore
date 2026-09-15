@@ -3,4 +3,5 @@ output
 log
 .vscode
 .workbuddy
+doc
 __pycache__

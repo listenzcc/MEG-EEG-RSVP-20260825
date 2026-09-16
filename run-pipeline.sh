@@ -20,18 +20,18 @@ which python
 python --version
 
 run_sh() {
-    echo =============================
+    echo "============================="
     echo "STAGE $1: $2"
-    echo =============================
+    echo "============================="
     ./"$1"
 }
 
 # ---- 图 1：ERP 与按键伪迹 ----
 # 1. 原始数据 -> epochs（-0.5 ~ 1.5 s，200 Hz，1/2/3 三类事件）
-run_sh 1.raw-to-epochs.sh "raw-to-epochs"
+# run_sh 1.raw-to-epochs.sh "raw-to-epochs"
 
 # 2. 10 / 20 Hz notch，得到 ERP 用的 notched epochs
-run_sh 2.notch-epochs.sh "notch-epochs"
+# run_sh 2.notch-epochs.sh "notch-epochs"
 
 # 3. 按键伪迹投影：用非目标(2)和按键(3)的平均构建 SSP，
 #    同时输出 target-non-target 差分 ERP（投影前后各一张）
@@ -53,9 +53,9 @@ run_sh 9.ssvep-qc.sh "ssvep-qc (sensor level, events 1 & 2)"
 run_sh 6.sliding-decode.sh "sliding-decode"
 
 # 跨被试群体曲线 + 峰值时间表
-echo =============================
+echo "============================="
 echo "STAGE check: group decoding curves"
-echo =============================
+echo "============================="
 python ./python/check-sliding-decode.py
 
 # ---- 图 4：源估计 ----

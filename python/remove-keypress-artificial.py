@@ -61,9 +61,10 @@ proj = proj2 + proj3
 # is the target-specific part, close to a spatially filtered difference wave.
 for name, evk, prj in [('non-target(2)', evoked2, proj2),
                        ('keypress(3)', evoked3, proj3)]:
+    v = np.sum([p['explained_var'] for p in proj])
     logger.info(
         f'Projector from {name} explains '
-        f'{[round(v, 3) for v in prj["explained_var"]]} of its variance')
+        f'{v} of its variance')
 
 
 # %% ---- 2026-08-26 ------------------------

@@ -28,10 +28,10 @@ run_sh() {
 
 # ---- 图 1：ERP 与按键伪迹 ----
 # 1. 原始数据 -> epochs（-0.5 ~ 1.5 s，200 Hz，1/2/3 三类事件）
-# run_sh 1.raw-to-epochs.sh "raw-to-epochs"
+run_sh 1.raw-to-epochs.sh "raw-to-epochs"
 
 # 2. 10 / 20 Hz notch，得到 ERP 用的 notched epochs
-# run_sh 2.notch-epochs.sh "notch-epochs"
+run_sh 2.notch-epochs.sh "notch-epochs"
 
 # 3. 按键伪迹投影：用非目标(2)和按键(3)的平均构建 SSP，
 #    同时输出 target-non-target 差分 ERP（投影前后各一张）
@@ -66,9 +66,9 @@ run_sh 8.source-estimation.sh "source-estimation (SSVEP + ERP before/after remov
 # 群体 z-map 交互查看；加 --png 可免交互出图
 # 例：python python/check-source-estimation.py -m MEG -t ave -e epochs-1-notch-epo.fif
 #     python python/check-source-estimation.py -m MEG -t ave -e epochs-1-notch-removal-artificial-epo.fif
-echo =============================
+echo "============================="
 echo "STAGE check: source maps (interactive, run per condition)"
-echo =============================
+echo "============================="
 echo "python python/check-source-estimation.py -m MEG -t ave -e epochs-1-notch-epo.fif"
 echo "python python/check-source-estimation.py -m MEG -t ave -e epochs-1-notch-removal-artificial-epo.fif"
 

@@ -7,6 +7,7 @@
 #   图 2  10 Hz SSVEP 传感器水平质检     -> stage 5
 #   图 3  滑动解码：0.3 s 成分承担解码    -> stage 6
 #   图 4  溯源：投影前运动皮层，投影后 0.3 s 皮层源 -> stage 7-8
+#   图 5  反应时分层：quick / slow 的目标响应        -> stage 10
 #
 # 每个 stage 都可以单独跑（各自有编号脚本），本文件是按顺序的入口。
 # 断点续跑：脚本级产物已存在时多数脚本会跳过或覆盖写，重跑是安全的。
@@ -72,5 +73,12 @@ echo "============================="
 echo "python python/check-source-estimation.py -m MEG -t ave -e epochs-1-notch-epo.fif"
 echo "python python/check-source-estimation.py -m MEG -t ave -e epochs-1-notch-removal-artificial-epo.fif"
 
-# ---- 可选：主线 B（单试次性能），与图 1-4 无关 ----
+# ---- 图 5：按反应时间分层的目标响应 ----
+# 输入是投影后的 epochs-1-notch-removal-artificial-epo.fif，
+# 所以 quick / slow 的差异不是反应锁时的按键成分。
+# 每名被试先按自己的 RT 中位数分，分不开就退到 0.4 s 固定阈值，
+# 再不行就用最快/最慢各三分之一。实际用的规则记在 summary-rma.csv。
+run_sh 10.quick-slow-analysis.sh "quick-slow-analysis (split target trials by RT)"
+
+# ---- 可选：主线 B（单试次性能），与图 1-5 无关 ----
 # ./7.eegnetv4-decode.sh

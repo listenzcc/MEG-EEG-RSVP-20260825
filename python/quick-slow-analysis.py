@@ -94,6 +94,27 @@ RT_WINDOW = (args.win[0], args.win[1])
 
 # %% ---- 2026-09-18 ------------------------
 # Function and class
+def sig4(x: float):
+    '''
+    Round a number to four significant digits.
+
+    The amplitudes have to stay in their native unit, Tesla for MEG (~1e-13)
+    and Volt for EEG (~1e-6). Rounding those to a fixed number of decimals
+    writes 0 for MEG and destroys the value for EEG too, which silently makes
+    the group level amplitude statistics come out empty. Significant digits
+    keep both readable and comparable.
+
+    Args:
+        x: The number to round
+
+    Returns:
+        The rounded number, nan stays nan
+    '''
+    if not np.isfinite(x):
+        return np.nan
+    return float(f'{x:.4g}')
+
+
 def load_rt(fpath: Path, mode: str, subject: str, rt_min: float,
             rt_max: float):
     '''
@@ -415,10 +436,10 @@ def main():
 
     row = dict(mode=MODE, subject=SUBJ, tag=TAG,
                n_total=n_trials, n_valid=len(df), **info,
-               gfp_peak_t_quick=round(t_q, 4), gfp_peak_a_quick=round(a_q, 6),
-               gfp_peak_t_slow=round(t_s, 4), gfp_peak_a_slow=round(a_s, 6),
-               amp_quick=round(float(sq.mean()), 6),
-               amp_slow=round(float(ss.mean()), 6),
+               gfp_peak_t_quick=round(t_q, 4), gfp_peak_a_quick=sig4(a_q),
+               gfp_peak_t_slow=round(t_s, 4), gfp_peak_a_slow=sig4(a_s),
+               amp_quick=sig4(float(sq.mean())),
+               amp_slow=sig4(float(ss.mean())),
                spearman_rho=round(float(rho), 4),
                spearman_p=float(f'{pval:.3g}'))
     upsert_summary(row, SUMMARY_CSV)

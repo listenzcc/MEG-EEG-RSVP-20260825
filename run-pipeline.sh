@@ -8,6 +8,8 @@
 #   图 3  滑动解码：0.3 s 成分承担解码    -> stage 6
 #   图 4  溯源：投影前运动皮层，投影后 0.3 s 皮层源 -> stage 7-8
 #   图 5  反应时分层：quick / slow 的目标响应        -> stage 10
+#   图 6  峰结构：MEG 双峰 vs EEG 单峰               -> stage 11
+#   图 7  峰窗口解码：晚窗还认不认 target            -> stage 12
 #
 # 每个 stage 都可以单独跑（各自有编号脚本），本文件是按顺序的入口。
 # 断点续跑：脚本级产物已存在时多数脚本会跳过或覆盖写，重跑是安全的。
@@ -80,5 +82,17 @@ echo "python python/check-source-estimation.py -m MEG -t ave -e epochs-1-notch-r
 # 再不行就用最快/最慢各三分之一。实际用的规则记在 summary-rma.csv。
 run_sh 10.quick-slow-analysis.sh "quick-slow-analysis (split target trials by RT)"
 
-# ---- 可选：主线 B（单试次性能），与图 1-5 无关 ----
+# ---- 图 6：目标响应的峰结构 ----
+# 投影后的 target 响应在 MEG 里是两个峰（约 0.29 s 与 0.47 s，中间 0.41 s 有谷），
+# 在 EEG 里是一个峰。quick-slow-analysis.py 只取窗内 argmax，会给一部分被试报
+# 第一个峰、另一部分报第二个峰，MEG 的配对检验因此失去检验力。
+run_sh 11.peak-structure.sh "peak-structure (first vs second peak)"
+
+# ---- 图 7：在峰窗口上解码 ----
+# windows：早窗 / 晚窗 / baseline 各自解 target vs non-target；
+# transfer：早窗训练晚窗测试（及反向）；
+# rt：target 试次内部解 quick vs slow，0.10-0.20 s 窗口早于任何真实按键。
+run_sh 12.peak-window-decode.sh "peak-window-decode (windows / transfer / rt)"
+
+# ---- 可选：主线 B（单试次性能），与图 1-7 无关 ----
 # ./7.eegnetv4-decode.sh

@@ -238,8 +238,18 @@ def upsert(row: dict, fpath: Path, keys=('mode', 'subject', 'tag',
     '''
     if fpath.exists():
         df = pd.read_csv(fpath)
+        # A key column that the old table does not have yet is filled with the
+        # value that stands for the default run, otherwise rerunning the
+        # default appends a second row next to the old one instead of
+        # replacing it.
+        for k in keys:
+            if k not in df.columns and k in row:
+                df[k] = 0. if isinstance(row[k], (int, float)) else row[k]
         same = np.ones(len(df), bool)
         for k in keys:
+            if k not in df.columns or k not in row:
+                same &= False
+                continue
             same &= (df[k] == row[k]).values
         df = df[~same]
     else:

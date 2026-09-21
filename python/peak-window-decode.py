@@ -15,7 +15,10 @@ Purpose:
     windows   Decode target against non-target separately inside the early
               window, the late window and a pre stimulus baseline window.
               If the late peak carries no target identity, its window sits at
-              chance and the peak is not a target component.
+              chance and the peak is not a target component. The late window
+              overlaps the keypress, so --min-rt can restrict the target trials
+              to the ones whose button came after the window, which removes the
+              single trial button residue as an explanation.
     transfer  Train the target against non-target classifier in one window and
               test it in the other. A classifier that does not transfer says
               the two peaks reflect different activity, a classifier that
@@ -65,6 +68,14 @@ parser.add_argument('-d', '--data-dir', default='output/epochs',
 parser.add_argument('--qs-dir', default='output/quick-slow',
                     help='Folder written by quick-slow-analysis.py, it holds '
                          'the quick and slow trial assignment')
+parser.add_argument('--min-rt', type=float, default=0.,
+                    help='When it is above zero the target against non-target '
+                         'decoding keeps only the target trials whose keypress '
+                         'came after this latency. The late window overlaps the '
+                         'keypress, so a residue of the single trial button '
+                         'response can always be suspected there; on the trials '
+                         'kept here every window ends before the button was '
+                         'pressed. 0 keeps all the trials')
 parser.add_argument('-o', '--output-dir', default='output/peak-window-decode',
                     help='Where the decoding results are written')
 parser.add_argument('-t', '--tag', default='rma',
@@ -206,8 +217,18 @@ def upsert(row: dict, fpath: Path,
     '''
     if fpath.exists():
         df = pd.read_csv(fpath)
+        # A key column that the old table does not have yet is filled with the
+        # value that stands for the default run, otherwise rerunning the
+        # default appends a second row next to the old one instead of
+        # replacing it.
+        for k in keys:
+            if k not in df.columns and k in row:
+                df[k] = 0. if isinstance(row[k], (int, float)) else row[k]
         same = np.ones(len(df), bool)
         for k in keys:
+            if k not in df.columns or k not in row:
+                same &= False
+                continue
             same &= (df[k] == row[k]).values
         df = df[~same]
     else:
@@ -237,6 +258,35 @@ def load_epochs(target: bool):
     return mne.read_epochs(fpath, preload=True, verbose='ERROR')
 
 
+def late_response_trials(n_trials: int):
+    '''
+    The target trial indices whose keypress came after args.min_rt seconds.
+
+    Args:
+        n_trials: The number of target epochs
+
+    Returns:
+        index: The sorted trial indices, None when the selection can not be
+            made
+    '''
+    trial_csv = QS_DIR / f'quick-slow-trials-{TAG}.csv'
+    if not trial_csv.exists():
+        logger.error(f'{trial_csv} does not exist, --min-rt needs it. Run '
+                     f'10.quick-slow-analysis.sh for {MODE}-{SUBJ} first.')
+        return None
+    df = pd.read_csv(trial_csv)
+    index = df[df['delay'] >= args.min_rt]['index'].to_numpy()
+    index = np.sort(index[index < n_trials])
+    if index.size < 20:
+        logger.warning(f'{MODE}-{SUBJ}: only {index.size} target trials have '
+                       f'a keypress later than {args.min_rt:g} s, '
+                       f'--min-rt is skipped')
+        return None
+    logger.info(f'{MODE}-{SUBJ}: {index.size} of {n_trials} target trials '
+                f'have a keypress later than {args.min_rt:g} s')
+    return index
+
+
 def run_windows():
     '''
     Decode target against non-target inside the baseline, the early and the
@@ -247,11 +297,17 @@ def run_windows():
     if epochs_1 is None or epochs_2 is None:
         return 1
 
+    idx_1_all = np.arange(len(epochs_1))
+    if args.min_rt > 0:
+        idx_1_all = late_response_trials(len(epochs_1))
+        if idx_1_all is None:
+            return 1
+
     # Keep the two classes comparable in size, otherwise the AUC of the
     # unbalanced design is hard to compare with the transfer analysis.
-    n = min(len(epochs_1), len(epochs_2))
+    n = min(len(idx_1_all), len(epochs_2))
     rng = np.random.default_rng(0)
-    idx_1 = np.sort(rng.choice(len(epochs_1), n, replace=False))
+    idx_1 = np.sort(rng.choice(idx_1_all, n, replace=False))
     idx_2 = np.sort(rng.choice(len(epochs_2), n, replace=False))
     y = np.r_[np.ones(n), np.zeros(n)]
 
@@ -261,12 +317,14 @@ def run_windows():
         auc, scores = cross_val_auc(X, y, args.n_splits)
         row = dict(mode=MODE, subject=SUBJ, tag=TAG, analysis='windows',
                    window=name, tmin=window[0], tmax=window[1],
+                   min_rt=args.min_rt,
                    auc=round(auc, 4), auc_std=round(float(scores.std()), 4),
                    n_per_class=n)
         upsert(row, WINDOW_CSV,
-               keys=('mode', 'subject', 'tag', 'window'))
+               keys=('mode', 'subject', 'tag', 'window', 'min_rt'))
         logger.info(f'{MODE}-{SUBJ} window {name} [{window[0]:g}, '
-                    f'{window[1]:g}] s: AUC {auc:.4f}')
+                    f'{window[1]:g}] s, min rt {args.min_rt:g} s: '
+                    f'AUC {auc:.4f}')
     return 0
 
 

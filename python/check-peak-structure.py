@@ -39,6 +39,10 @@ parser.add_argument('--exclude-non-double', action='store_true',
                     help='Keep only the rows with two peaks, which makes the '
                          'comparison of the two conditions rest on the same '
                          'set of subjects')
+parser.add_argument('--early-peak1', type=float, default=0.22,
+                    help='A first peak earlier than this is counted as the '
+                         'early visual response rather than the target '
+                         'component, it only affects the diagnostic column')
 args = parser.parse_args()
 TAG = args.tag
 
@@ -111,14 +115,21 @@ for mode in ['EEG', 'MEG']:
             continue
         n = len(select)
         n_double = int((select['n_peaks'] >= 2).sum())
+        peak1 = select.get('peak1_t', pd.Series(dtype=float))
+        # The search window starts at 0.05 s, so for a few subjects the first
+        # peak lands on the early visual response instead of on the target
+        # component. Those rows measure something else than the rest and are
+        # counted here so that they can be left out by hand.
+        n_early = int((peak1 < args.early_peak1).sum())
         rows.append(dict(
             mode=mode, condition=condition, n=n, n_double=n_double,
             frac_double=n_double / n,
-            peak1_t=select.get('peak1_t', pd.Series(dtype=float)).mean(),
+            peak1_t=peak1.mean(),
             peak2_t=select.get('peak2_t', pd.Series(dtype=float)).mean(),
             dip_ratio=select.get('dip_ratio', pd.Series(dtype=float)).mean(),
             argmax_dominates_peak2=int(
-                (select.get('dominant', pd.Series(dtype=float)) == 2).sum())))
+                (select.get('dominant', pd.Series(dtype=float)) == 2).sum()),
+            n_peak1_early=n_early))
 incidence = pd.DataFrame(rows)
 display(incidence)
 
@@ -173,7 +184,7 @@ for r, mode in enumerate(['EEG', 'MEG']):
     ax.set_xticks([0, 1])
     ax.set_xticklabels(['quick', 'slow'])
     ax.set_ylabel('Peak latency (s)')
-    ax.set_title(f'{mode}: latency of the first and the second peak')
+    ax.set_title(f'{mode}: first and second peak latency', fontsize=11)
     ax.legend(fontsize=8)
 
     # Panel 2: the argmax readout against the first peak
@@ -195,8 +206,8 @@ for r, mode in enumerate(['EEG', 'MEG']):
     ax.set_xticks([.5, 2.5])
     ax.set_xticklabels(['quick', 'slow'])
     ax.set_ylabel('Latency (s)')
-    ax.set_title(f'{mode}: argmax (left) versus peak1 (right)\\n'
-                 f'red lines are the subjects where argmax takes the second peak')
+    ax.set_title(f'{mode}: argmax vs peak1, red = argmax took peak2',
+                 fontsize=11)
     ax.legend(handles=[plt.Line2D([], [], color='tab:red', lw=2,
                                   label='argmax != peak1')], fontsize=8)
 
@@ -213,8 +224,8 @@ for r, mode in enumerate(['EEG', 'MEG']):
                 color=colour)
     ax.set_xlabel('Trough depth, dip / first peak')
     ax.set_ylabel('Subjects')
-    ax.set_title(f'{mode}: dip between the two peaks\\n'
-                 f'only subjects with a second peak are counted')
+    ax.set_title(f'{mode}: dip depth, double peaked subjects only',
+                 fontsize=11)
     ax.legend(fontsize=8)
 
 fig.tight_layout()

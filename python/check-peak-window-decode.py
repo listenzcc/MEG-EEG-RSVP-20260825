@@ -39,8 +39,16 @@ parser.add_argument('--win-early', type=float, nargs=2, default=[0.24, 0.36],
                     help='The first peak window, for the shading only')
 parser.add_argument('--win-late', type=float, nargs=2, default=[0.41, 0.55],
                     help='The second peak window, for the shading only')
+parser.add_argument('--min-rt', type=float, default=0.,
+                    help='Which variant of the window decoding to summarize, '
+                         'it must match the --min-rt of peak-window-decode.py. '
+                         '0 is the run on all the target trials')
 args = parser.parse_args()
 TAG = args.tag
+
+# The control run on the late keypress trials is a second table, it must not
+# overwrite the main one, so every output of it carries the latency
+MINRT_SUFFIX = '' if args.min_rt <= 0 else f'-minrt{args.min_rt:g}'
 
 DATA_DIR = Path(args.data_dir)
 OUTPUT_DIR = DATA_DIR
@@ -138,6 +146,26 @@ win = pd.read_csv(WINDOW_CSV)
 tra = pd.read_csv(TRANSFER_CSV)
 rt = pd.read_csv(RT_CSV)
 
+# The window table can hold several trial selections next to each other, the
+# min rt column keeps them apart. A table written before that column existed
+# has only the run on all the trials, and summarizing it as the control run
+# would put the main result into a file named after the control.
+if 'min_rt' in win.columns:
+    n_all = len(win)
+    min_rt = win['min_rt'].fillna(0.).to_numpy(dtype=float)
+    win = win[np.isclose(min_rt, args.min_rt)]
+    logger.info(f'--min-rt {args.min_rt:g} keeps {len(win)} of {n_all} rows '
+                f'of the window table')
+elif args.min_rt > 0:
+    logger.error(f'{WINDOW_CSV} has no min_rt column, it was written before '
+                 f'--min-rt existed. Run peak-window-decode.py --min-rt '
+                 f'{args.min_rt:g} first.')
+    raise SystemExit(1)
+if win.empty:
+    logger.error(f'There is no window row with min rt {args.min_rt:g}. Run '
+                 f'peak-window-decode.py --min-rt {args.min_rt:g} first.')
+    raise SystemExit(1)
+
 # ---- the window decoding ----
 rows = []
 for mode in ['EEG', 'MEG']:
@@ -190,6 +218,11 @@ rt_stats = pd.DataFrame(rows)
 display(rt_stats)
 
 # ---- figure ----
+# The per subject rt curves live in rt-scores-{TAG}.txt of every subject folder.
+# An exported result set often ships only the png and the csv, in which case the
+# third column can not be drawn; the figure is then saved next to the complete
+# one instead of on top of it.
+partial = []
 fig, axes = plt.subplots(2, 3, figsize=(21, 10))
 for r, mode in enumerate(['EEG', 'MEG']):
     rng = np.random.default_rng(0)
@@ -263,6 +296,11 @@ for r, mode in enumerate(['EEG', 'MEG']):
                    alpha=.08)
         ax.axvspan(args.win_late[0], args.win_late[1], color='tab:blue',
                    alpha=.08)
+        ax.legend(fontsize=8)
+    else:
+        partial.append(mode)
+        logger.warning(f'{mode}: no rt-scores-{TAG}.txt was found, the panel '
+                       f'stays empty')
     ax.axhline(.5, color='gray', ls=':', lw=.9)
     ax.axvline(0, color='k', ls=':', lw=.8)
     ax.set_xlim(-.2, .8)
@@ -270,17 +308,24 @@ for r, mode in enumerate(['EEG', 'MEG']):
     ax.set_xlabel('Time (s)')
     ax.set_ylabel('AUC')
     ax.set_title(f'{mode}: when does the epoch know the reaction time')
-    ax.legend(fontsize=8)
+
+if args.min_rt > 0:
+    fig.suptitle(f'The late window control, only the target trials whose '
+                 f'keypress came after {args.min_rt:g} s')
 
 fig.tight_layout()
-fname = OUTPUT_DIR / f'group-peak-window-decode-{TAG}.png'
+suffix = ('-no-rt-curve' if partial else '') + MINRT_SUFFIX
+fname = OUTPUT_DIR / f'group-peak-window-decode-{TAG}{suffix}.png'
 fig.savefig(fname, dpi=120)
 plt.close(fig)
+if partial:
+    logger.warning(f'{partial} have no rt curve, the figure is saved as '
+                   f'{fname.name} so that the complete one is left alone')
 logger.info(f'Saved into {fname}')
 
 for name, table in [('windows', windows), ('transfer', transfer),
                     ('rt', rt_stats)]:
-    fname = OUTPUT_DIR / f'group-peak-window-{name}-{TAG}.csv'
+    fname = OUTPUT_DIR / f'group-peak-window-{name}-{TAG}{MINRT_SUFFIX}.csv'
     table.to_csv(fname, index=False)
     logger.info(f'Saved into {fname}')
 

@@ -106,7 +106,13 @@ def paired(a: np.ndarray, b: np.ndarray):
         statistic, pvalue: nan when there are too few subjects
     '''
     mask = np.isfinite(a) & np.isfinite(b)
-    if mask.sum() < 5 or np.allclose(a[mask], b[mask]):
+    if mask.sum() < 5:
+        return np.nan, np.nan
+    if np.all(a[mask] == b[mask]):
+        # Identical columns, which happens when every value was rounded off.
+        # A plain np.allclose would also fire here, because its default
+        # absolute tolerance of 1e-8 dwarfs the magnetometer amplitudes that
+        # live around 1e-14, so the exact comparison is what is wanted.
         return np.nan, np.nan
     stat, p = wilcoxon(a[mask], b[mask])
     return float(stat), float(p)

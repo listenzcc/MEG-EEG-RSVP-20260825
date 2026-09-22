@@ -311,7 +311,15 @@ for r, mode in enumerate(['EEG', 'MEG']):
 
 if args.min_rt > 0:
     fig.suptitle(f'The late window control, only the target trials whose '
-                 f'keypress came after {args.min_rt:g} s')
+                 f'keypress came after {args.min_rt:g} s\n'
+                 f'the middle and the right panel keep every trial, '
+                 f'--min-rt only reaches the window decoding')
+    for r, mode in enumerate(['EEG', 'MEG']):
+        n_mode = int((win['mode'] == mode).sum() // 3)
+        if n_mode < 5:
+            logger.warning(f'{mode}: only {n_mode} subject has a trial with a '
+                           f'keypress after {args.min_rt:g} s, the top left '
+                           f'panel is not a group result')
 
 fig.tight_layout()
 suffix = ('-no-rt-curve' if partial else '') + MINRT_SUFFIX
@@ -323,8 +331,19 @@ if partial:
                    f'{fname.name} so that the complete one is left alone')
 logger.info(f'Saved into {fname}')
 
-for name, table in [('windows', windows), ('transfer', transfer),
-                    ('rt', rt_stats)]:
+tables = [('windows', windows)]
+if args.min_rt > 0:
+    # The transfer and the rt decoding read their own csv, which carry no min
+    # rt column, so they would be written under the name of a control while
+    # still holding every trial. That is worse than not writing them.
+    logger.warning(f'--min-rt {args.min_rt:g} only filters the window '
+                   f'decoding, the transfer and the rt tables of this run are '
+                   f'left out on purpose. Rerun peak-window-decode.py with '
+                   f'--min-rt if those two are needed as well.')
+else:
+    tables += [('transfer', transfer), ('rt', rt_stats)]
+
+for name, table in tables:
     fname = OUTPUT_DIR / f'group-peak-window-{name}-{TAG}{MINRT_SUFFIX}.csv'
     table.to_csv(fname, index=False)
     logger.info(f'Saved into {fname}')

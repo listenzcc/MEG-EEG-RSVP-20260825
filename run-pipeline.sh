@@ -11,6 +11,7 @@
 #   3. stage 11  只重画群体图（逐被试结果没变）      -> 图 6 标题重叠的修正
 #   4. stage 12  晚窗的残余按键对照（--min-rt 0.55） -> 图 7 的 late 结论
 #   5. stage 13  全被试群体 z-map（新）              -> 图 4 缺的群体源图
+#   6. stage 14  MEG / EEG 群体 mean 脑图截图（新）  -> 图 4 的图本身，需要 3D 后端
 #
 # 依赖关系：13 只读 stage 8 的 stc，而 stage 8 不用重跑；12 的对照要 stage 10
 # 的分组表，所以 10 排在 12 前面；11 的群体图读 stage 10 的峰数据。
@@ -80,6 +81,14 @@ run_check "group decoding curves" ./python/check-sliding-decode.py
 # 交互查看单被试图的旧入口（python/check-source-estimation.py）保留，
 # 群体图用这个新 stage，不必再一张张看。
 run_sh 13.group-source-map.sh "group-source-map (all subjects, z map)"
+
+# ---- 图 4：群体 mean 脑图截图（要跑，新）----
+# 13 出的是数字（峰时刻、MNI、标签、FDR），这个出的是图本身：把 stc 平均成
+# 群体 mean，用 stc.plot 渲在 fsaverage 上截图，一次出 MEG 和 EEG 两张。
+# 峰时刻直接读 13 的同一个读数，所以图表一致。
+# 需要 3D 后端（pip install pyvista pyvistaqt）；无显示器的机器套 xvfb-run。
+# 只想验证平均与选峰、不碰渲染器：python ./python/group-source-plot.py --dry-run
+run_sh 14.group-source-plot.sh "group-source-plot (MEG / EEG group mean)"
 
 # ---- 图 5：按反应时间分层的目标响应（要重跑：幅度列被舍成 6 位小数）----
 # 导出的 summary-rma.csv 里 gfp_peak_a_* / amp_* 是固定 6 位小数，MEG 全是 0、

@@ -320,7 +320,9 @@ def render(stc, mode: str, times, subjects_dir):
             brain = stc.plot(
                 subject='fsaverage', subjects_dir=subjects_dir, hemi=hemi,
                 views=list(args.views), initial_time=snapped,
-                time_viewer=False, show=False, clim=clim, colorbar=True,
+                time_viewer=False,
+                # show=False,
+                clim=clim, colorbar=True,
                 size=(args.panel_size[0] * len(args.views),
                       args.panel_size[1]),
                 background='white', foreground='black',

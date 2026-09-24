@@ -5,3 +5,4 @@ log
 .workbuddy
 doc
 __pycache__
+*.tar

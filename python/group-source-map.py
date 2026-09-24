@@ -687,14 +687,14 @@ else:
 
 # How much of the map survives the correction
 ax = axes[1, 1]
-threshold = p_crit if np.isfinite(p_crit) else 0.
-n_sig = np.array([int((p_map[:, i] <= threshold).sum())
-                  for i in range(len(times))])
-ax.plot(times, n_sig, lw=1.4, color='tab:green',
-        label=f'vertices passing FDR {args.fdr}')
-ax.axvspan(args.search_window[0], args.search_window[1], color='tab:blue',
-           alpha=.06)
-ax.axvline(peak['peak_time'], color='tab:red', ls='--', lw=1.)
+# threshold = p_crit if np.isfinite(p_crit) else 0.
+# n_sig = np.array([int((p_map[:, i] <= threshold).sum())
+#                   for i in range(len(times))])
+# ax.plot(times, n_sig, lw=1.4, color='tab:green',
+#         label=f'vertices passing FDR {args.fdr}')
+# ax.axvspan(args.search_window[0], args.search_window[1], color='tab:blue',
+#            alpha=.06)
+# ax.axvline(peak['peak_time'], color='tab:red', ls='--', lw=1.)
 ax.set_xlabel('Time (s)')
 ax.set_ylabel('Vertices')
 if np.isfinite(p_crit):

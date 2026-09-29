@@ -42,12 +42,12 @@ subjects=(S01 S02 S03 S04 S05 S06 S07 S08 S09 S10)
 # ---- 主结果：全部 target 试次，三个分析都跑 ----
 # 已经在 output/peak-window-decode/ 里了，脚本没改过就不用重跑，
 # 所以这一段默认注释掉。
-# for mode in EEG MEG; do
-#     for subj in $subjects; do
-#         python $script -m $mode -s $subj
-#     done
-# done
-# python ./python/check-peak-window-decode.py
+for mode in EEG MEG; do
+    for subj in $subjects; do
+        python $script -m $mode -s $subj
+    done
+done
+python ./python/check-peak-window-decode.py
 
 # ---- 晚窗的残余按键对照：要跑 ----
 # 只保留按键晚于 0.55 s 的 target 试次，此时晚窗 [0.41, 0.55] s 完全落在按键

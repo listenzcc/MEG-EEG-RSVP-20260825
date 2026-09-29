@@ -146,12 +146,19 @@ for mode in ['EEG', 'MEG']:
                 logger.warning(f'{fpath} does not exist')
                 continue
             evoked = mne.read_evokeds(fpath, verbose='ERROR')[0]
+            if mode == 'MEG':
+                evoked.pick(
+                    [e for e in evoked.ch_names if e[2] == 'O'])
+            if mode == 'EEG':
+                evoked.pick(
+                    [e for e in evoked.ch_names if e[0] == 'O'])
             picks = pick_data(evoked.info)
             gfp = global_field_power(evoked.data[picks])
             if times is None:
                 times = evoked.times
             elif not np.array_equal(times, evoked.times):
-                logger.warning(f'{mode}-{row["subject"]} has another time axis')
+                logger.warning(
+                    f'{mode}-{row["subject"]} has another time axis')
                 continue
             values.append(gfp)
         if values:
@@ -184,12 +191,19 @@ for r, mode in enumerate(['EEG', 'MEG']):
         ax.plot(times, mean, color=color, label=group, lw=1.8)
         ax.fill_between(times, mean - sem, mean + sem,
                         color=color, alpha=0.15)
-    ax.axvline(0, color='k', ls=':', lw=0.8)
-    ax.axvspan(args.win[0], args.win[1], color='0.9', alpha=0.5, zorder=-1)
+
+    # ax.axvline(0, color='k', ls=':', lw=0.8)
+    _times = [0.15, 0.22, 0.28, 0.35, 0.46]
+    _y, _ = ax.get_ylim()
+    for _t in _times:
+        ax.axvline(_t, color='k', ls=':', lw=0.8)
+        ax.text(_t, _y, f'{_t}')
+
+    # ax.axvspan(args.win[0], args.win[1], color='0.9', alpha=0.5, zorder=-1)
     ax.set_xlim(args.win[0] - 0.05, args.win[1])
     ax.set_xlabel('Time (s)')
     ax.set_ylabel(f'Global field power ({unit})')
-    ax.set_title(f'{mode}: target after removal, quick versus slow')
+    ax.set_title(f'{mode}: Occipital, target after removal, quick versus slow')
     ax.legend()
 
     # Panel 2: paired peak latency

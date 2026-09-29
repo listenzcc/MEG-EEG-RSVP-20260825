@@ -62,67 +62,89 @@ for evt, flag_removal_artificial, td in product(
         pattern = f'{MODE}-S*/epochs-{evt}-notch-ave.fif'
         img_fname = OUTPUT_DIR / f'{td}-{evt}-notch-ave.png'
 
-    if img_fname.exists():
-        continue
+    evt_fname = img_fname.with_suffix('.ave.fif')
 
-    logger.debug(f'Find files by {pattern=}')
-    files = sorted(DATA_DIR.rglob(pattern))
-    logger.debug(f'{files=}')
+    if evt_fname.exists():
+        evoked = mne.read_evokeds(evt_fname)[0]
+    else:
+        logger.debug(f'Find files by {pattern=}')
+        files = sorted(DATA_DIR.rglob(pattern))
+        logger.debug(f'{files=}')
 
-    evokeds = []
-    numbers = []
-    for fname in files:
-        mode, subj = fname.parent.name.split('-')
-        logger.debug(f'{mode=}, {subj=}')
+        evokeds = []
+        numbers = []
+        for fname in files:
+            mode, subj = fname.parent.name.split('-')
+            logger.debug(f'{mode=}, {subj=}')
 
-        if flag_removal_artificial:
-            _fname = f'{mode}-{subj}/epochs-{evt}-notch-removal-artificial-epo.fif'
-        else:
-            _fname = f'{mode}-{subj}/epochs-{evt}-notch-epo.fif'
+            if flag_removal_artificial:
+                _fname = f'{mode}-{subj}/epochs-{evt}-notch-removal-artificial-epo.fif'
+            else:
+                _fname = f'{mode}-{subj}/epochs-{evt}-notch-epo.fif'
 
-        epochs = mne.read_epochs(DATA_DIR / _fname)
+            epochs = mne.read_epochs(DATA_DIR / _fname)
 
-        # evokeds += mne.read_evokeds(fname)
-        # evoked = evokeds[0]
+            # evokeds += mne.read_evokeds(fname)
+            # evoked = evokeds[0]
 
-        # Fetch the table
-        td_threshold = 0.38
-        queries = [f'mode=="{mode}"', f'subject=="{subj}"']
-        if evt == '1':
-            df = target_df.query(' & '.join(queries))
-        elif evt == '3':
-            df = keypress_df.query(' & '.join(queries))
+            # Fetch the table
+            td_threshold = 0.38
+            queries = [f'mode=="{mode}"', f'subject=="{subj}"']
+            if evt == '1':
+                df = target_df.query(' & '.join(queries))
+            elif evt == '3':
+                df = keypress_df.query(' & '.join(queries))
 
-        # Separate the quick and slow epochs
-        if evt != '2':
-            if td == 'quick':
-                df = df.query(f'delay < {td_threshold}')
-            elif td == 'slow':
-                df = df.query(f'delay >= {td_threshold}')
+            # Separate the quick and slow epochs
+            if evt != '2':
+                if td == 'quick':
+                    df = df.query(f'delay < {td_threshold}')
+                elif td == 'slow':
+                    df = df.query(f'delay >= {td_threshold}')
 
-        # Apply the mask
-        if evt != '2':
-            epochs = epochs[df['index']]
-        else:
-            epochs = epochs
+            # Apply the mask
+            if evt != '2':
+                epochs = epochs[df['index']]
+            else:
+                epochs = epochs
 
-        evoked = epochs.average()
-        evokeds.append(evoked)
+            evoked = epochs.average()
+            evokeds.append(evoked)
 
-        numbers.append(evoked.nave)
+            numbers.append(evoked.nave)
 
-    total = np.sum(numbers)
+        total = np.sum(numbers)
 
-    data = []
-    for n, evoked in zip(numbers, evokeds):
-        data.append(evoked.data * n / total)
+        data = []
+        for n, evoked in zip(numbers, evokeds):
+            data.append(evoked.data * n / total)
 
-    evoked.data = np.sum(data, axis=0)
+        evoked.data = np.sum(data, axis=0)
+        evoked.save(evt_fname, overwrite=True)
+        logger.debug(f'Saved into {evt_fname}')
 
-    fig = evoked.plot_joint(title=f'{evt=}', show=False)
+    if evt == '1':
+        _times = [0.15, 0.22, 0.28, 0.35, 0.46]
+        evoked.filter(0.1, 5, n_jobs=-1)
+        evoked.apply_baseline()
+
+    elif evt == '3':
+        _times = 'peaks'
+        evoked.filter(0.1, 5, n_jobs=-1)
+        evoked.apply_baseline((None, -0.25))
+
+    else:
+        _times = 'peaks'
+
+    fig = evoked.plot_joint(
+        title=f'{evt=}', show=False, times=_times)
+
+    fig.suptitle(img_fname.stem)
+
     fig.savefig(img_fname)
     plt.close(fig)
     logger.debug(f'Saved into {img_fname}')
+
 
 # %% ---- 2026-08-26 ------------------------
 # Pending

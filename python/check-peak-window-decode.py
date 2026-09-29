@@ -137,9 +137,11 @@ def column(df: pd.DataFrame, mode: str, **select):
 
 # %% ---- 2026-09-20 ------------------------
 # Play ground
-missing = [p.name for p in (WINDOW_CSV, TRANSFER_CSV, RT_CSV) if not p.exists()]
+missing = [p.name for p in (
+    WINDOW_CSV, TRANSFER_CSV, RT_CSV) if not p.exists()]
 if missing:
-    logger.error(f'{missing} do not exist. Run 12.peak-window-decode.sh first.')
+    logger.error(
+        f'{missing} do not exist. Run 12.peak-window-decode.sh first.')
     raise SystemExit(1)
 
 win = pd.read_csv(WINDOW_CSV)
@@ -303,8 +305,16 @@ for r, mode in enumerate(['EEG', 'MEG']):
                        f'stays empty')
     ax.axhline(.5, color='gray', ls=':', lw=.9)
     ax.axvline(0, color='k', ls=':', lw=.8)
+
     ax.set_xlim(-.2, .8)
     ax.set_ylim(.4, .75)
+
+    _times = [0.31, 0.46]
+    _y, _ = ax.get_ylim()
+    for _t in _times:
+        ax.axvline(_t, color='k', ls=':', lw=0.8)
+        ax.text(_t, _y, f'{_t}')
+
     ax.set_xlabel('Time (s)')
     ax.set_ylabel('AUC')
     ax.set_title(f'{mode}: when does the epoch know the reaction time')

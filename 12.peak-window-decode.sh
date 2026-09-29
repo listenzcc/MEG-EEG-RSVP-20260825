@@ -55,12 +55,12 @@ python ./python/check-peak-window-decode.py
 # 就不能再用"残余按键成分"解释；如果掉到 chance，图 7 的 late 结论就得改成
 # "与残余按键不可分离"。两套结果按 min_rt 分行存在同一张 csv 里，产物带
 # -minrt0.55 后缀，不覆盖主结果。
-min_rt=0.55
+# min_rt=0.55
 
-for mode in EEG MEG; do
-    for subj in $subjects; do
-        python $script -m $mode -s $subj --analysis windows --min-rt $min_rt
-    done
-done
+# for mode in EEG MEG; do
+#     for subj in $subjects; do
+#         python $script -m $mode -s $subj --analysis windows --min-rt $min_rt
+#     done
+# done
 
-python ./python/check-peak-window-decode.py --min-rt $min_rt
+# python ./python/check-peak-window-decode.py --min-rt $min_rt

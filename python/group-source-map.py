@@ -733,6 +733,7 @@ if args.brain:
     except Exception as e:
         logger.warning(f'The surface plot failed, {e}')
 
+input('')
 
 # %% ---- 2026-09-21 ------------------------
 # Pending

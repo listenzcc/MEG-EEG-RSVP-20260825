@@ -1,13 +1,19 @@
 #!/usr/bin/env python3
 
+import argparse
 import subprocess
+
+parser = argparse.ArgumentParser(description='Git pull or push script')
+parser.add_argument('action', choices=['pull', 'push'], help='Action to perform')
 
 
 def main():
+    args = parser.parse_args()
+    print(args)
     try:
         result = subprocess.run(
             # ["git", "push"],
-            ["git", "pull"],
+            ["git", args.action],
             capture_output=True,  # Capture both stdout and stderr
             text=True,           # Return output as string (not bytes)
             check=True           # Raise exception if command fails

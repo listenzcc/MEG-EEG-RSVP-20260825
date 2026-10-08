@@ -21,6 +21,20 @@ Purpose:
     estimated trial by trial, which also keeps the induced part of the component
     at the cost of one inverse solution per trial.
 
+    With --rt-group the target trials are first split into the quick and the
+    slow reaction time group by quick-slow-analysis.py, and only one of the two
+    groups is estimated. The split is read from the trials csv of that script,
+    so the subsets are exactly the ones the sensor level comparison used. The
+    noise covariance stays on the whole target condition: the two groups are
+    compared with each other, and an inverse operator of its own per group
+    would put the difference between the two regularizations into the contrast
+    as well.
+
+Usage:
+    python python/source-estimation.py -m MEG -s S01 -e epochs-1-notch-epo.fif
+    python python/source-estimation.py -m EEG -s S01 -e epochs-1-notch-removal-artificial-epo.fif --rt_group quick
+    python python/source-estimation.py -m MEG -s S01 -e epochs-1-epo.fif --ssvep_freq 10 --cov_band control
+
 Functions:
     1. Requirements and constants
     2. Function and class
@@ -61,6 +75,18 @@ parser.add_argument('--no_power', action='store_true',
 parser.add_argument('--trial_power', action='store_true',
                     help='Estimate the power trial by trial, it also keeps the induced part of the component but it is much slower')
 
+# The reaction time groups. Both the underscore and the dash spelling are
+# accepted, this file uses underscores and the shell wrappers are easier to
+# read with dashes.
+parser.add_argument('--rt_group', '--rt-group', dest='rt_group', default=None,
+                    choices=['quick', 'slow'],
+                    help='Estimate the source of the quick or the slow target group only. The trials come from the split written by quick-slow-analysis.py, the noise covariance is still measured on the whole target condition so the two groups share one inverse operator')
+parser.add_argument('--rt_dir', '--rt-dir', dest='rt_dir',
+                    default='output/quick-slow',
+                    help='The folder where quick-slow-analysis.py wrote the trials csv')
+parser.add_argument('--rt_tag', '--rt-tag', dest='rt_tag', default='rma',
+                    help='The tag of the quick-slow output, it names the trials csv')
+
 # The inverse solution
 parser.add_argument('--snr', type=float, default=3.,
                     help='SNR used by lambda2 = 1 / snr ** 2')
@@ -84,6 +110,7 @@ EPOCHS_FNAME = args.epochs_fname
 
 SSVEP_FREQ = args.ssvep_freq
 SSVEP_BW = args.ssvep_bw
+RT_GROUP = args.rt_group
 SNR = args.snr
 METHOD = args.method
 COV_METHOD = args.cov_method
@@ -97,8 +124,16 @@ DATA_DIR = Path(f'output/epochs/{MODE}-{SUBJ}')
 OUTPUT_DIR = Path(f'output/source-estimation/{MODE}-{SUBJ}')
 OUTPUT_DIR.mkdir(exist_ok=True, parents=True)
 
+# The trials csv of the reaction time split, written by quick-slow-analysis.py
+RT_FILE = Path(args.rt_dir) / f'{MODE}-{SUBJ}' / f'quick-slow-trials-{args.rt_tag}.csv'
+
 # The tag of the outputs, the tag of the plain ERP is 'ave' to keep it unchanged
 TAG = 'ave' if SSVEP_FREQ is None else f'ssvep{SSVEP_FREQ:g}'
+
+# The two reaction time groups are two conditions of the same epochs, so they
+# become two tags of the same epochs rather than two epochs files
+if RT_GROUP is not None:
+    TAG = f'{TAG}-{RT_GROUP}'
 
 # The 10 Hz SSVEP lives in the epochs without the 10 Hz notch
 if SSVEP_FREQ is not None and 'notch' in EPOCHS_FNAME:
@@ -106,6 +141,14 @@ if SSVEP_FREQ is not None and 'notch' in EPOCHS_FNAME:
         f'{EPOCHS_FNAME} is the notched epochs, the {SSVEP_FREQ:g} Hz component '
         'has been removed by notch-epochs.py. Use the epochs before the notch, '
         'e.g. epochs-1-epo.fif.')
+
+# The reaction time split is defined on the broadband target response, the
+# frequency extraction of the SSVEP branch would happen before the split and
+# the two would be hard to keep consistent
+if RT_GROUP is not None and SSVEP_FREQ is not None:
+    raise SystemExit(
+        '--rt_group splits the broadband target trials, it is not combined with '
+        '--ssvep_freq. Run the two as separate source estimations.')
 
 # %% ---- 2026-09-11 ------------------------
 # Function and class
@@ -213,6 +256,39 @@ if MODE == 'EEG':
     epochs = epochs.set_eeg_reference('average', projection=True)
     logger.debug(f'Added the average reference, {epochs.info["projs"]=}')
 
+# The reaction time split. The whole condition is kept for the noise covariance
+# and only the average is taken on the subset, so the two groups differ in the
+# data that goes through the inverse operator and in nothing else.
+epochs_all = None
+if RT_GROUP is not None:
+    epochs_all = epochs.copy()
+    if not RT_FILE.exists():
+        raise SystemExit(
+            f'There is no {RT_FILE}, run 10.quick-slow-analysis.sh for '
+            f'{MODE}-{SUBJ} first. The split has to be the same one the sensor '
+            'level comparison used, a split recomputed here could differ.')
+
+    df_split = pd.read_csv(RT_FILE)
+    for column in ('group', 'index'):
+        if column not in df_split.columns:
+            raise SystemExit(f'{RT_FILE} has no {column} column, it reads '
+                             f'{list(df_split.columns)}')
+
+    # The index column points at the trial axis of epochs-1, which is the trial
+    # axis of the epochs file read here as well
+    trial_index = df_split['index'].to_numpy()
+    group = df_split['group'].astype(str).to_numpy()
+    mask = (group == RT_GROUP) & (trial_index < len(epochs))
+    idx = np.sort(trial_index[mask].astype(int))
+    if idx.size == 0:
+        raise SystemExit(f'{RT_FILE} has no usable {RT_GROUP} trial of '
+                         f'{MODE}-{SUBJ}, the groups are '
+                         f'{sorted(set(group.tolist()))}')
+    logger.info(f'The {RT_GROUP} group is {idx.size} of {len(epochs)} trials')
+
+    epochs = epochs[idx]
+    logger.info(f'Cut the {RT_GROUP} group out, {epochs=}')
+
 # The noise covariance is measured on the epochs before the extraction when the
 # control band is used
 epochs_cov = None
@@ -296,7 +372,14 @@ print(f"正向解计算完成: {fwd}")
 # 5. 计算噪声协方差矩阵
 # 使用刺激前的时间窗估计噪声，噪声必须和参与溯源的数据在同一个频带内
 if epochs_cov is None:
-    epochs_cov = epochs
+    # The two reaction time groups are compared with each other, so they have
+    # to share one inverse operator. Measuring the covariance on the subset of
+    # one group would put the difference between the two regularizations into
+    # the contrast as well.
+    epochs_cov = epochs if epochs_all is None else epochs_all
+    if epochs_all is not None:
+        logger.info('The noise covariance is measured on the whole condition, '
+                    'both reaction time groups share the same inverse operator')
     if SSVEP_FREQ is not None:
         logger.debug(f'The noise is measured in the {TAG} band itself')
 
@@ -334,8 +417,10 @@ stc = apply_inverse(
 )
 
 print(f"溯源结果: {stc}")
+# TAG carries the reaction time group when --rt_group is used, so the two
+# groups of one subject land in two files next to each other
 if SSVEP_FREQ is None:
-    FNAME_STC = OUTPUT_DIR / f'{EPOCHS_FNAME}.ave.stc'
+    FNAME_STC = OUTPUT_DIR / f'{EPOCHS_FNAME}.{TAG}.stc'
 else:
     FNAME_STC = OUTPUT_DIR / f'{EPOCHS_FNAME}.{TAG}-evoked.stc'
 stc.save(FNAME_STC, overwrite=True)

@@ -12,9 +12,11 @@
 #   4. stage 12  晚窗的残余按键对照（--min-rt 0.55） -> 图 7 的 late 结论
 #   5. stage 13  全被试群体 z-map（新）              -> 图 4 缺的群体源图
 #   6. stage 14  MEG / EEG 群体 mean 脑图截图（新）  -> 图 4 的图本身，需要 3D 后端
+#   7. stage 15  quick / slow 的源空间对比（新）     -> 图 5 的溯源版本，见下
 #
 # 依赖关系：13 只读 stage 8 的 stc，而 stage 8 不用重跑；12 的对照要 stage 10
-# 的分组表，所以 10 排在 12 前面；11 的群体图读 stage 10 的峰数据。
+# 的分组表，所以 10 排在 12 前面；11 的群体图读 stage 10 的峰数据；15 同时依赖
+# stage 8 的 epochs 与 stage 10 的分组表，所以要排在 10 后面。
 # ============================================================================
 #
 #   图 1  ERP：按键伪迹掩盖目标响应             -> stage 1-5
@@ -97,6 +99,16 @@ run_sh 14.group-source-plot.sh "group-source-plot (MEG / EEG group mean)"
 # 输入是投影后的 epochs-1-notch-removal-artificial-epo.fif，所以 quick / slow
 # 的差异不是反应锁时的按键成分。
 run_sh 10.quick-slow-analysis.sh "quick-slow-analysis (split target trials by RT)"
+
+# ---- 图 5：quick / slow 的源空间对比（要跑，新）----
+# 传感器水平的幅度差有没有可定位的皮层对应物。三段：
+#   A 逐被试：--rt_group 按 stage 10 的分组表切试次，两组共用同一个逆算子；
+#   B 群体：各出 quick / slow 的 z 图，再出 quick 减 slow 的配对差图；
+#   C 渲染：两组图用同一个时刻渲染（MEG 0.270 s / EEG 0.350 s），否则 panel
+#     之间的差别里混着时间差。
+# 成本高：A 段 40 次逆解、每次重算正演，按小时计。
+# 只想验证数据通路：python ./python/group-source-plot.py -t ave-quick ave-slow --dry-run
+run_sh 15.rt-source-contrast.sh "rt-source-contrast (quick vs slow in source space)"
 
 # ---- 图 6：目标响应的峰结构（逐被试结果没变，只重画群体图）----
 # peak-structure-rma.csv 的数值不受本轮改动影响（改的只是 upsert 的容错），

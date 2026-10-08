@@ -11,7 +11,12 @@
 # B 组：宽带 ERP 的溯源，按键投影前后各跑一遍（epochs-1-notch-epo.fif 与
 #      epochs-1-notch-removal-artificial-epo.fif），这是"投影前峰值在运动皮层、
 #      投影后转到 0.3 s 皮层源"这组对比图的数据来源。
+#      另加 epochs-2-notch-removal-artificial-epo.fif，即投影后的非目标，
+#      stage 13 的 target 减 non-target 对照读的就是它。
 # 两组都建议先跑 9.ssvep-qc.sh 确认成分在（B 组不限频带，QC 主要针对 A 组）。
+#
+# --rt_group 是 stage 15 用的：把 target 试次按反应时切成 quick / slow 两组分别
+# 溯源。那一段由 15.rt-source-contrast.sh 负责，不在这里跑。
 
 source ~/.zshrc
 conda activate mne-analysis
@@ -47,5 +52,20 @@ for mode in "${modes[@]}"; do
         for efname in "${erp_epochs_fnames[@]}"; do
             python $script --subject $subj --mode $mode --epochs_fname $efname
         done
+    done
+done
+
+# ---- B 组之二：非目标（投影后），stage 13 的对照需要它 ----
+# 13.group-source-map.sh 里 -c epochs-2-notch-removal-artificial-epo.fif 那一行
+# 要的是非目标在投影后的 stc。少了这一段，那两条命令会因为找不到文件而中断，
+# group-source-summary.csv 里也就不会出现 target 减 non-target 的行。
+#
+# 读的时候注意口径：投影算子是从非目标与按键试次上估出来的，所以非目标的 ERP
+# 本身也被投掉了一部分。这个差是「两个条件在同一个投影下之差」，不是「非目标当
+# 基线」——removal 之后的 evt=2 不能拿来当基线用。
+for mode in "${modes[@]}"; do
+    for subj in "${subjects[@]}"; do
+        python $script --subject $subj --mode $mode \
+            --epochs_fname epochs-2-notch-removal-artificial-epo.fif
     done
 done

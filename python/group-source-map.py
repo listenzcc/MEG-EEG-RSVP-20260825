@@ -28,6 +28,12 @@ Purpose:
     statistics then test whether the difference is there at all, which is
     the claim the article makes about the 0.3 s component.
 
+    With --contrast_tag the two conditions are two tags of one epochs file
+    instead of two files, e.g. the quick and the slow reaction time group of
+    the target. That contrast is within the subject as well, so the one sample
+    test on the difference is the paired test and it is the right one here.
+    The direction of the map is the first tag minus the second one.
+
     Two corrections are reported and they answer different questions. The
     vertex wise false discovery rate keeps the spatial detail and is the
     honest description of a map whose effects are focal. The permutation
@@ -48,6 +54,9 @@ Usage:
     python python/group-source-map.py -m EEG \
         -e epochs-1-notch-removal-artificial-epo.fif -t ave \
         -c epochs-2-notch-removal-artificial-epo.fif
+    python python/group-source-map.py -m MEG \
+        -e epochs-1-notch-removal-artificial-epo.fif \
+        -t ave-quick --contrast-tag ave-slow --n-perm 1024
     python python/group-source-map.py -m MEG -e epochs-1-epo.fif \
         -t ssvep10-power --normalize none
 
@@ -78,6 +87,15 @@ parser.add_argument('-t', '--tag', default='ave',
 parser.add_argument('-c', '--contrast_epochs', default=None,
                     help='Subtract this epochs of the same subject before the '
                          'normalization, e.g. the non target epochs')
+parser.add_argument('--contrast_tag', '--contrast-tag', dest='contrast_tag',
+                    default=None,
+                    help='Subtract this tag of the same epochs instead of '
+                         'another epochs file, e.g. -t ave-quick '
+                         '--contrast-tag ave-slow compares the two reaction '
+                         'time groups. The two tags have to be two conditions '
+                         'of one epochs file, which is a within subject '
+                         'contrast, so the one sample test on the difference '
+                         'is the paired test')
 parser.add_argument('-s', '--subjects', nargs='*', default=None,
                     help='Subject names like S01, every subject found on the '
                          'disk by default')
@@ -118,6 +136,9 @@ parser.add_argument('--perm-window', type=float, nargs=2, default=[0.0, 0.8],
 parser.add_argument('--brain', action='store_true',
                     help='Also try to render the group map on the surface, '
                          'it needs a 3d backend to be installed')
+parser.add_argument('--pause', action='store_true',
+                    help='Wait for a key press at the end, it only makes sense '
+                         'when the script is run as an interactive cell')
 parser.add_argument('-o', '--output-dir', default='output/group-source-map',
                     help='Where the group maps are written')
 
@@ -126,6 +147,15 @@ MODE = args.mode
 EPOCHS_FNAME = args.epochs_fname
 TAG = args.tag
 CONTRAST_FNAME = args.contrast_epochs
+CONTRAST_TAG = args.contrast_tag
+
+if CONTRAST_FNAME is not None and CONTRAST_TAG is not None:
+    raise SystemExit('-c/--contrast_epochs takes another epochs file and '
+                     '--contrast_tag takes another tag of the same epochs, '
+                     'only one of the two describes the contrast')
+if CONTRAST_TAG is not None and CONTRAST_TAG == TAG:
+    raise SystemExit(f'--contrast_tag {CONTRAST_TAG} is the same as the tag of '
+                     'the map itself, the contrast would be empty')
 
 logger.info(f'Start with {args=}')
 
@@ -134,10 +164,16 @@ DATA_DIR = Path('output/source-estimation')
 OUTPUT_DIR = Path(args.output_dir)
 OUTPUT_DIR.mkdir(exist_ok=True, parents=True)
 
-# The name every output of this run shares
+# The name every output of this run shares. The contrast enters the name so a
+# run against another condition never overwrites the plain one.
 NAME = f'{MODE}-{EPOCHS_FNAME}'
 if CONTRAST_FNAME is not None:
     NAME += f'-minus-{CONTRAST_FNAME}'
+
+# The condition this run describes, the pair of tags when the contrast is a
+# within epochs one
+COND = TAG if CONTRAST_TAG is None else f'{TAG}-minus-{CONTRAST_TAG}'
+FILE_STEM = f'{NAME}.{COND}'
 
 # %% ---- 2026-09-21 ------------------------
 # Function and class
@@ -195,11 +231,17 @@ def load_subjects():
         stc = mne.read_source_estimate(str(stem))
         data = stc.data.astype(np.float64)
 
-        if CONTRAST_FNAME is not None:
-            stem_b = stc_stem(MODE, subj, CONTRAST_FNAME, TAG)
+        if CONTRAST_FNAME is not None or CONTRAST_TAG is not None:
+            # The contrast is either another epochs file of the same tag, the
+            # target minus the non target for example, or another tag of the
+            # same epochs, the quick minus the slow reaction time group
+            fname_b = CONTRAST_FNAME if CONTRAST_FNAME is not None \
+                else EPOCHS_FNAME
+            tag_b = CONTRAST_TAG if CONTRAST_TAG is not None else TAG
+            stem_b = stc_stem(MODE, subj, fname_b, tag_b)
             if stem_b is None:
                 logger.warning(
-                    f'{MODE}-{subj} has no {CONTRAST_FNAME}.{TAG}, the '
+                    f'{MODE}-{subj} has no {fname_b}.{tag_b}, the '
                     'subject is left out of the contrast')
                 continue
             stc_b = mne.read_source_estimate(str(stem_b))
@@ -372,19 +414,21 @@ def maximum_statistic(data: np.ndarray, window: np.ndarray):
 
 
 def upsert(row: dict, fpath: Path, keys=('mode', 'epochs_fname', 'tag',
-                                         'contrast_epochs')):
+                                         'contrast_epochs', 'contrast_tag')):
     '''
     Write one row into the summary csv, replacing the older row of the same
     condition if there is one, so rerunning never duplicates rows.
     '''
     if fpath.exists():
         df = pd.read_csv(fpath)
-        # A key column the old table does not have yet is filled with the
-        # value that stands for the default run, otherwise rerunning the
-        # default appends a second row instead of replacing it.
+        # A key column the old table does not have yet is filled with nan.
+        # Filling it with the value of the new row would make every old row look
+        # like the row that is being written and would replace rows that
+        # describe something else. nan only matches the default run, which is
+        # the one the old rows without the column are.
         for k in keys:
-            if k not in df.columns and k in row:
-                df[k] = '' if row[k] is None else row[k]
+            if k not in df.columns:
+                df[k] = np.nan
         same = np.ones(len(df), bool)
         for k in keys:
             if row.get(k) is None:
@@ -422,8 +466,8 @@ stc_t = template.copy()
 stc_t.data = t_map
 stc_t.subject = 'fsaverage'
 
-fname_z = OUTPUT_DIR / f'group-{NAME}.{TAG}-z.stc'
-fname_t = OUTPUT_DIR / f'group-{NAME}.{TAG}-t.stc'
+fname_z = OUTPUT_DIR / f'group-{FILE_STEM}-z.stc'
+fname_t = OUTPUT_DIR / f'group-{FILE_STEM}-t.stc'
 stc_z.save(fname_z, overwrite=True)
 stc_t.save(fname_t, overwrite=True)
 logger.info(f'Saved into {fname_z} and {fname_t}')
@@ -525,7 +569,7 @@ for name, parcel_hemi, idx in parcels:
         peak_z=float(f'{group_z[idx, i_time].mean():.4g}')))
 
 df_labels = pd.DataFrame(rows)
-fname_labels = OUTPUT_DIR / f'group-{NAME}.{TAG}-labels.csv'
+fname_labels = OUTPUT_DIR / f'group-{FILE_STEM}-labels.csv'
 df_labels.to_csv(fname_labels, index=False)
 logger.info(f'Saved {len(df_labels)} labels into {fname_labels}')
 
@@ -606,14 +650,15 @@ else:
 # %% ---- 2026-09-21 ------------------------
 # The summary table
 row = dict(mode=MODE, epochs_fname=EPOCHS_FNAME, tag=TAG,
-           contrast_epochs=CONTRAST_FNAME, n_subjects=len(subjects),
+           contrast_epochs=CONTRAST_FNAME, contrast_tag=CONTRAST_TAG,
+           n_subjects=len(subjects),
            subjects=' '.join(subjects), normalize=args.normalize,
            baseline=f'{args.baseline[0]:g} {args.baseline[1]:g}',
            **peak)
 df_summary = pd.DataFrame([row])
 display(df_summary)
 
-fname_summary = OUTPUT_DIR / f'group-{NAME}.{TAG}-summary.csv'
+fname_summary = OUTPUT_DIR / f'group-{FILE_STEM}-summary.csv'
 df_summary.to_csv(fname_summary, index=False)
 logger.info(f'Saved into {fname_summary}')
 upsert(row, OUTPUT_DIR / 'group-source-summary.csv')
@@ -624,6 +669,8 @@ fig, axes = plt.subplots(2, 2, figsize=(15, 9))
 title = f'{MODE} {EPOCHS_FNAME}.{TAG}'
 if CONTRAST_FNAME is not None:
     title += f' minus {CONTRAST_FNAME}'
+if CONTRAST_TAG is not None:
+    title += f' minus {CONTRAST_TAG}'
 fig.suptitle(f'{title}, {len(subjects)} subjects, '
              f'{args.normalize} normalized')
 
@@ -712,7 +759,7 @@ if null.size:
 ax.legend(fontsize=8, loc='upper right')
 
 fig.tight_layout()
-fname = OUTPUT_DIR / f'group-{NAME}.{TAG}.png'
+fname = OUTPUT_DIR / f'group-{FILE_STEM}.png'
 fig.savefig(fname, dpi=120)
 plt.close(fig)
 logger.info(f'Saved into {fname}')
@@ -727,13 +774,19 @@ if args.brain:
                            subjects_dir=SUBJECTS_DIR, time_viewer=False,
                            show=False)
         fname = (OUTPUT_DIR /
-                 f'group-{NAME}.{TAG}-peak{peak["peak_time"]:.3f}s.png')
+                 f'group-{FILE_STEM}-peak{peak["peak_time"]:.3f}s.png')
         brain.save_image(fname)
         logger.info(f'Saved the surface into {fname}')
     except Exception as e:
         logger.warning(f'The surface plot failed, {e}')
 
-input('')
+# The pause belongs to the interactive cell workflow, it keeps the figures on
+# the screen while the next block is written. It is off by default because this
+# file is also a pipeline stage, and a pause there blocks the whole pipeline on
+# a key press that never comes. sys.stdin.isatty() is not a usable test for it:
+# on Windows it reports a terminal even when stdin is /dev/null.
+if args.pause:
+    input('')
 
 # %% ---- 2026-09-21 ------------------------
 # Pending

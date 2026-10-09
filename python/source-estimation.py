@@ -30,10 +30,23 @@ Purpose:
     would put the difference between the two regularizations into the contrast
     as well.
 
+    With --cov-epochs-fname the covariance is measured on another epochs file
+    of the same subject instead of on the one that is estimated. The forward
+    solution depends on the channels, so the two files share one head model and
+    can share one inverse operator, which is what a comparison of two epochs
+    files needs. The epochs with and without the keypress projection are the
+    case it was written for: the projection takes a subspace out of the data,
+    so the covariance of the projected epochs is smaller and an operator of its
+    own would be regularized differently, and it is nearly singular on the
+    removed subspace, where the inverse would amplify whatever is left. Measure
+    it on the epochs without the projection, the direction matters - the other
+    way round the operator of the projected data overfits the removed subspace.
+
 Usage:
     python python/source-estimation.py -m MEG -s S01 -e epochs-1-notch-epo.fif
     python python/source-estimation.py -m EEG -s S01 -e epochs-1-notch-removal-artificial-epo.fif --rt_group quick
     python python/source-estimation.py -m MEG -s S01 -e epochs-1-epo.fif --ssvep_freq 10 --cov_band control
+    python python/source-estimation.py -m MEG -s S01 -e epochs-1-notch-removal-artificial-epo.fif --rt_group quick --cov_epochs_fname epochs-1-notch-epo.fif
 
 Functions:
     1. Requirements and constants
@@ -87,6 +100,28 @@ parser.add_argument('--rt_dir', '--rt-dir', dest='rt_dir',
 parser.add_argument('--rt_tag', '--rt-tag', dest='rt_tag', default='rma',
                     help='The tag of the quick-slow output, it names the trials csv')
 
+# Which inverse operator the run uses, and what the outputs are called
+parser.add_argument('--cov_epochs_fname', '--cov-epochs-fname',
+                    dest='cov_epochs_fname', default=None,
+                    help='Measure the noise covariance on this other epochs file '
+                         'of the same subject instead of on the one being '
+                         'estimated. The forward solution depends on the '
+                         'channels and not on the data, so the two files of a '
+                         'subject share one head model and can share one '
+                         'inverse operator. It is what a comparison of two '
+                         'epochs files needs: the keypress projection removes '
+                         'part of the variance, so the covariance of the '
+                         'projected epochs is smaller and its own operator '
+                         'would be regularized differently. The whole '
+                         'condition of the file given here is used')
+parser.add_argument('--tag_suffix', '--tag-suffix', dest='tag_suffix',
+                    default=None,
+                    help='Append this to the tag of the outputs, so a rerun can '
+                         'be kept next to the earlier one instead of '
+                         'overwriting it. Give the same suffix to every run of '
+                         'a comparison, the conditions stay comparable with '
+                         'each other and only the plain tag is left untouched')
+
 # The inverse solution
 parser.add_argument('--snr', type=float, default=3.,
                     help='SNR used by lambda2 = 1 / snr ** 2')
@@ -124,6 +159,18 @@ DATA_DIR = Path(f'output/epochs/{MODE}-{SUBJ}')
 OUTPUT_DIR = Path(f'output/source-estimation/{MODE}-{SUBJ}')
 OUTPUT_DIR.mkdir(exist_ok=True, parents=True)
 
+# The epochs the covariance is read from is checked here, before the forward
+# solution is computed: a typo in the name would otherwise cost a few minutes of
+# forward modelling and then fail anyway.
+COV_FNAME = None
+if args.cov_epochs_fname is not None:
+    COV_FNAME = DATA_DIR / args.cov_epochs_fname
+    if not COV_FNAME.exists():
+        raise SystemExit(
+            f'There is no {COV_FNAME}, it is the epochs the noise covariance '
+            f'should be measured on. Run 2.notch-epochs.sh for {MODE}-{SUBJ} '
+            'first, or drop --cov_epochs_fname.')
+
 # The trials csv of the reaction time split, written by quick-slow-analysis.py
 RT_FILE = Path(args.rt_dir) / f'{MODE}-{SUBJ}' / f'quick-slow-trials-{args.rt_tag}.csv'
 
@@ -134,6 +181,12 @@ TAG = 'ave' if SSVEP_FREQ is None else f'ssvep{SSVEP_FREQ:g}'
 # become two tags of the same epochs rather than two epochs files
 if RT_GROUP is not None:
     TAG = f'{TAG}-{RT_GROUP}'
+
+# The projection states and the two reaction time groups are four conditions of
+# one epochs file each, the epochs fname already tells the two states apart in
+# the file name. The suffix is for keeping a rerun next to an earlier one.
+SUFFIX = f'-{args.tag_suffix}' if args.tag_suffix else ''
+TAG = f'{TAG}{SUFFIX}'
 
 # The 10 Hz SSVEP lives in the epochs without the 10 Hz notch
 if SSVEP_FREQ is not None and 'notch' in EPOCHS_FNAME:
@@ -149,6 +202,16 @@ if RT_GROUP is not None and SSVEP_FREQ is not None:
     raise SystemExit(
         '--rt_group splits the broadband target trials, it is not combined with '
         '--ssvep_freq. Run the two as separate source estimations.')
+
+# The covariance of the SSVEP branch is measured in a band and the band is
+# extracted from the epochs inside this script, so another file would have to
+# go through the same extraction before its covariance means anything. The
+# comparison of two epochs files is the broadband one, --cov_band is the option
+# of the SSVEP branch.
+if args.cov_epochs_fname is not None and SSVEP_FREQ is not None:
+    raise SystemExit(
+        '--cov_epochs_fname compares two epochs files, the SSVEP branch '
+        'compares two bands of one file. Use --cov_band control instead.')
 
 # %% ---- 2026-09-11 ------------------------
 # Function and class
@@ -372,16 +435,41 @@ print(f"正向解计算完成: {fwd}")
 # 5. 计算噪声协方差矩阵
 # 使用刺激前的时间窗估计噪声，噪声必须和参与溯源的数据在同一个频带内
 if epochs_cov is None:
-    # The two reaction time groups are compared with each other, so they have
-    # to share one inverse operator. Measuring the covariance on the subset of
-    # one group would put the difference between the two regularizations into
-    # the contrast as well.
-    epochs_cov = epochs if epochs_all is None else epochs_all
-    if epochs_all is not None:
-        logger.info('The noise covariance is measured on the whole condition, '
-                    'both reaction time groups share the same inverse operator')
-    if SSVEP_FREQ is not None:
-        logger.debug(f'The noise is measured in the {TAG} band itself')
+    if args.cov_epochs_fname is not None:
+        # The covariance is measured on another epochs file of the same subject
+        # and the whole condition of it, the same rule the reaction time groups
+        # follow: one inverse operator for every run that is compared with
+        # another one, so a difference between two maps is the data and not the
+        # regularization. The file has been checked above.
+        if args.cov_epochs_fname == EPOCHS_FNAME:
+            logger.info('--cov_epochs_fname is the epochs being estimated, the '
+                        'covariance is measured on it as usual')
+
+        epochs_cov = mne.read_epochs(COV_FNAME, preload=True, verbose='ERROR')
+        if MODE == 'EEG':
+            epochs_cov = epochs_cov.set_eeg_reference(
+                'average', projection=True)
+        if list(epochs_cov.ch_names) != list(epochs.ch_names):
+            raise SystemExit(
+                f'{args.cov_epochs_fname} has {len(epochs_cov.ch_names)} '
+                f'channels and {EPOCHS_FNAME} has {len(epochs.ch_names)}, the '
+                'two can not share one inverse operator.')
+        logger.info(
+            f'The noise covariance is measured on the whole '
+            f'{args.cov_epochs_fname}, {len(epochs_cov)} trials, so this run '
+            'and every other run given the same file share one inverse '
+            'operator')
+    else:
+        # The two reaction time groups are compared with each other, so they have
+        # to share one inverse operator. Measuring the covariance on the subset of
+        # one group would put the difference between the two regularizations into
+        # the contrast as well.
+        epochs_cov = epochs if epochs_all is None else epochs_all
+        if epochs_all is not None:
+            logger.info('The noise covariance is measured on the whole condition, '
+                        'both reaction time groups share the same inverse operator')
+        if SSVEP_FREQ is not None:
+            logger.debug(f'The noise is measured in the {TAG} band itself')
 
 try:
     cov = mne.compute_covariance(

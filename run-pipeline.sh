@@ -110,6 +110,16 @@ run_sh 10.quick-slow-analysis.sh "quick-slow-analysis (split target trials by RT
 # 只想验证数据通路：python ./python/group-source-plot.py -t ave-quick ave-slow --dry-run
 run_sh 15.rt-source-contrast.sh "rt-source-contrast (quick vs slow in source space)"
 
+# ---- 投影前后 × quick / slow 的 2×2 对照 ----
+# 回答的是「投影前的那份 target 数据里 quick 和 slow 有没有源空间差别」。
+# 四个条件（投影前/后 × quick/slow）共用同一个逆算子：协方差一律量在投影前的
+# 整个 target 条件上。反过来量在投影后的文件上会把「投影拿掉了什么」这件事
+# 本身清零，实测差值图恒等于 0，原因见 16 的文件头。
+# 四条件都带 --tag_suffix sharedcov，不与 stage 15 的产物互相覆盖。
+# 成本是 stage 15 的两倍（80 次逆解），建议先只跑 MEG。
+#   modes=(MEG) 或把 subjects 缩到两三个人先跑通
+run_sh 16.rt-source-projection.sh "rt-source-projection (before/after the keypress projection)"
+
 # ---- 图 6：目标响应的峰结构（逐被试结果没变，只重画群体图）----
 # peak-structure-rma.csv 的数值不受本轮改动影响（改的只是 upsert 的容错），
 # 所以 20 次逐被试计算不必再跑；需要重跑的只有群体汇总，它修好了标题重叠，

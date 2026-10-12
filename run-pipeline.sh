@@ -120,6 +120,21 @@ run_sh 15.rt-source-contrast.sh "rt-source-contrast (quick vs slow in source spa
 #   modes=(MEG) 或把 subjects 缩到两三个人先跑通
 run_sh 16.rt-source-projection.sh "rt-source-projection (before/after the keypress projection)"
 
+# ---- 投影拆分对照（S 级验证，2026-10-12 新增，见 doc/projection-validation.md §1）----
+# 3.remove-keypress-artificial.sh 投的是 proj2(视觉) + proj3(按键) 两组投影器的并集，
+# 拆开分别投就得到一个天然对照——两者同来源、同维数、同批试次，唯一差别是
+# 有没有运动成分。若 0.4 s 峰只被按键组拿掉、视觉组拿不掉，贡献 1 的归因从
+# 「投影前峰恰好在运动区」的间接推理升级为直接对照；若两组都拿掉，归因不成立。
+# 成本：40 次投影（只读 epochs，不做逆解）+ 2 次对照分析。
+run_sh 17.projection-split.sh "projection-split (visual vs keypress projectors)"
+
+# ---- 按键事件审计（S 级验证，2026-10-12 新增，见 doc/projection-validation.md §2）----
+# 在 raw annotations 层面统计「非目标 + 按键」的试次是否存在。已有线索：
+# EEG 按键事件 511 比 target 504 多 7 个。若确认存在这类试次，就得到一个
+# 完全不依赖投影的内部对照（有按键、无 target 的条件下 0.4 s 峰是否仍在）。
+# 只读头信息（preload=False），每个被试几秒。先跑一个被试核对 event_id。
+run_sh 18.keypress-trial-audit.sh "keypress-trial-audit (raw level event audit)"
+
 # ---- 图 6：目标响应的峰结构（逐被试结果没变，只重画群体图）----
 # peak-structure-rma.csv 的数值不受本轮改动影响（改的只是 upsert 的容错），
 # 所以 20 次逐被试计算不必再跑；需要重跑的只有群体汇总，它修好了标题重叠，

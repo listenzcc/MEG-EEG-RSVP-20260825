@@ -6,3 +6,4 @@ log
 doc
 __pycache__
 *.tar
+*.backup*

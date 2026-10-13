@@ -123,6 +123,8 @@ def read_peak(evoked):
 # Play ground
 group_evokeds = {}
 rows = []
+curves = {}
+curve_times = None
 
 for cond in CONDITIONS:
     tag, stem = cond['tag'], cond['stem']
@@ -157,6 +159,11 @@ for cond in CONDITIONS:
         rows.append(dict(mode=MODE, subject=subj, tag=tag,
                          nave=evoked.nave, **read_peak(_evoked)))
 
+        # Keep the GFP curve for the fixed-latency reading below
+        curves[(subj, tag)] = gfp(_evoked)
+        if curve_times is None:
+            curve_times = _evoked.times
+
     assert len(evokeds) > 0, f'No epochs found for {MODE=}, {tag=}'
     logger.info(f'{tag}: {len(evokeds)} subjects, {np.sum(numbers)} trials')
 
@@ -184,6 +191,31 @@ for tag in ['visual', 'keypress', 'both']:
         (pivot[tag] / pivot['none']).rename(f'ratio_{tag}_vs_none').reset_index(),
         on='subject', how='left')
 
+# Fixed-latency reading: every condition read at the unprojected peak time of
+# the same subject. The window-max ratio conflates 'how much was removed' with
+# 'where the residual peak moved to' - after the keypress projection the window
+# maximum is often the surviving early component, not the remnant of the 0.4 s
+# peak. Reading at the none peak time isolates the removal itself.
+df['gfp_at_none_peak'] = np.nan
+for subj, sub in df.groupby('subject'):
+    none_rows = sub[sub['tag'] == 'none']
+    if len(none_rows) == 0 or curve_times is None:
+        continue
+    t_peak = float(none_rows['peak_t_window'].iloc[0])
+    for idx, tag in zip(sub.index, sub['tag']):
+        curve = curves.get((subj, tag))
+        if curve is not None:
+            df.loc[idx, 'gfp_at_none_peak'] = np.interp(
+                t_peak, curve_times, curve)
+
+pivot_g = df.pivot_table(index='subject', columns='tag',
+                         values='gfp_at_none_peak', aggfunc='first')
+for tag in ['visual', 'keypress', 'both']:
+    df = df.merge(
+        (pivot_g[tag] / pivot_g['none']).rename(
+            f'ratio_at_none_peak_{tag}_vs_none').reset_index(),
+        on='subject', how='left')
+
 fname = OUTPUT_DIR / f'{MODE}-per-subject.csv'
 df.to_csv(fname, index=False, float_format='%.6g')
 logger.info(f'Saved into {fname}')
@@ -201,10 +233,17 @@ for cond in CONDITIONS:
         vals = df.loc[df['tag'] == tag, f'ratio_{tag}_vs_none'].dropna().values
         # wilcoxon errors out when every difference is exactly zero
         p = stats.wilcoxon(vals - 1).pvalue if np.any(vals != 1) else np.nan
+        fixed = df.loc[df['tag'] == tag,
+                       f'ratio_at_none_peak_{tag}_vs_none'].dropna().values
+        pf = (stats.wilcoxon(fixed - 1).pvalue
+              if np.any(fixed != 1) else np.nan)
         line.update(
             median_ratio_vs_none=np.median(vals),
             n_subject_ratio_below_one=int((vals < 1).sum()),
-            wilcoxon_p_vs_one=p)
+            wilcoxon_p_vs_one=p,
+            median_ratio_at_none_peak=np.median(fixed),
+            n_subject_fixed_below_one=int((fixed < 1).sum()),
+            wilcoxon_p_fixed_vs_one=pf)
     summary.append(line)
 
 summary_df = pd.DataFrame(summary)
@@ -212,6 +251,26 @@ fname = OUTPUT_DIR / f'{MODE}-group-summary.csv'
 summary_df.to_csv(fname, index=False, float_format='%.6g')
 logger.info(f'Saved into {fname}')
 print(summary_df.to_string(index=False))
+
+# %%
+# The specificity test: does the keypress subspace remove more of the
+# component than the visual subspace, within the same subjects?
+paired = []
+for label, tab in [('window-max', pivot), ('at-none-peak', pivot_g)]:
+    d = tab['keypress'] - tab['visual']
+    if np.all(d == 0):
+        continue
+    paired.append(dict(
+        mode=MODE, measure=label, n_subjects=len(d),
+        median_keypress_minus_visual=np.median(d),
+        n_subject_keypress_below_visual=int((d < 0).sum()),
+        wilcoxon_p=stats.wilcoxon(tab['keypress'], tab['visual']).pvalue))
+
+paired_df = pd.DataFrame(paired)
+fname = OUTPUT_DIR / f'{MODE}-paired-specificity.csv'
+paired_df.to_csv(fname, index=False, float_format='%.6g')
+logger.info(f'Saved into {fname}')
+print(paired_df.to_string(index=False))
 
 
 # %% ---- 2026-10-12 ------------------------

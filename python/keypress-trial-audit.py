@@ -42,6 +42,10 @@ parser.add_argument('-m', '--mode', default='EEG', help='Mode name EEG | MEG')
 parser.add_argument('--summarize', action='store_true',
                     help='Fold the per-subject csv into summary-{MODE}.csv '
                          'instead of reading raw data')
+parser.add_argument('--per-event', '--per_event', dest='per_event',
+                    action='store_true',
+                    help='Additionally dump one row per unmatched keypress '
+                         'into {MODE}-{SUBJ}-unmatched.csv')
 parser.add_argument('--rt-window', '--rt_window', dest='rt_window',
                     default='0.15,0.8',
                     help='Window (s) before a keypress in which its trigger '
@@ -103,7 +107,8 @@ def load_raw(RAW_DIR: Path):
     return raw
 
 
-def classify_events(events, codes, sfreq, rt_window, logger_=logger):
+def classify_events(events, codes, sfreq, rt_window, logger_=logger,
+                    unmatched_records=None):
     '''
     Relate keypress events to the image events that could have triggered them.
 
@@ -121,6 +126,8 @@ def classify_events(events, codes, sfreq, rt_window, logger_=logger):
         codes: dict with target / nontarget / keypress integer codes
         sfreq: sampling rate of the raw data, in Hz
         rt_window: (lo, hi) in seconds, the window searched before a keypress
+        unmatched_records: optional list; when given, one dict per unmatched
+            keypress is appended to it (for the --per-event dump)
 
     Returns:
         dict of counts, plus delay distributions in ms
@@ -167,6 +174,51 @@ def classify_events(events, codes, sfreq, rt_window, logger_=logger):
         out['delay_median_to_target_ms'] = float(np.median(nearest) * 1e3)
         out['delay_iqr_to_target_ms'] = float((q3 - q1) * 1e3)
 
+    def prev_target_delay(query):
+        '''Delay from each query time back to the nearest preceding target,
+        NaN when no target precedes it at all.'''
+        idx = np.searchsorted(tg, query, side='right') - 1
+        d = np.full(len(query), np.nan)
+        m = idx >= 0
+        d[m] = (query[m] - tg[idx[m]]) / sfreq
+        return d
+
+    # What are the unmatched presses? A late response to an earlier target
+    # still has a target within about a second; a press unrelated to any
+    # target meets one only at the chance level of a 4% target stream (mean
+    # gap ~2.5 s). The same statistic computed at non-target image times is
+    # the chance-level null: if the unmatched presses look like the null they
+    # are spontaneous, if they are much closer to a target they are slow
+    # responses and NOT a clean keypress-without-target control.
+    un = kp[~window_has_tg]
+    if len(un):
+        d_prev = prev_target_delay(un)
+        out['unmatched_n'] = int(len(un))
+        out['unmatched_prev_target_median_ms'] = float(
+            np.nanmedian(d_prev) * 1e3)
+        out['unmatched_frac_prev_within_1s'] = float(
+            np.nanmean(d_prev <= 1.0))
+
+        idx_next = np.searchsorted(tg, un, side='left')
+        d_next = np.full(len(un), np.nan)
+        m2 = idx_next < len(tg)
+        d_next[m2] = (tg[idx_next[m2]] - un[m2]) / sfreq
+        out['unmatched_next_target_median_ms'] = float(
+            np.nanmedian(d_next) * 1e3)
+
+        if len(nt):
+            d_null = prev_target_delay(nt)
+            out['null_prev_target_median_ms'] = float(
+                np.nanmedian(d_null) * 1e3)
+            out['null_frac_prev_within_1s'] = float(
+                np.nanmean(d_null <= 1.0))
+
+        if unmatched_records is not None:
+            unmatched_records.extend(dict(
+                subject='', kp_sample=int(k), kp_time_s=float(k / sfreq),
+                prev_target_delay_s=float(d), next_target_delay_s=float(n))
+                for k, d, n in zip(un, d_prev, d_next))
+
     # Delay to the nearest preceding image of any kind, as a marker sanity check
     pic_t = np.sort(np.concatenate([tg, nt]))
     idx = np.searchsorted(pic_t, kp, side='right') - 1
@@ -212,9 +264,18 @@ if args.summarize:
     print('-' * 72)
     for col in ['targets', 'nontargets', 'keypresses', 'other_events',
                 'kp_with_target_in_window', 'kp_without_target_in_window',
-                'target_with_keypress', 'target_without_keypress']:
+                'target_with_keypress', 'target_without_keypress',
+                'unmatched_n']:
         if col in df.columns:
             print(f'{col:<30} total {int(df[col].fillna(0).sum()):>8}')
+
+    # The spontaneous-versus-late verdict, one glance per subject
+    pairs = [('unmatched_prev_target_median_ms', 'null_prev_target_median_ms'),
+             ('unmatched_frac_prev_within_1s', 'null_frac_prev_within_1s')]
+    for a, b in pairs:
+        if a in df.columns and b in df.columns:
+            print(f'{a:<32} median {df[a].median():8.1f}   '
+                  f'({b} median {df[b].median():8.1f})')
 
     sys.exit(0)
 
@@ -252,6 +313,16 @@ fname = OUTPUT_DIR / f'{MODE}-{SUBJ}.csv'
 pd.DataFrame([row]).to_csv(fname, index=False, float_format='%.6g')
 logger.info(f'Saved into {fname}')
 print(pd.DataFrame([row]).T.to_string())
+
+if args.per_event:
+    records = []
+    classify_events(events, codes, raw.info['sfreq'],
+                    (RT_LO, RT_HI), logger, unmatched_records=records)
+    for r in records:
+        r['subject'] = SUBJ
+    fname = OUTPUT_DIR / f'{MODE}-{SUBJ}-unmatched.csv'
+    pd.DataFrame(records).to_csv(fname, index=False, float_format='%.6g')
+    logger.info(f'{len(records)} unmatched keypresses into {fname}')
 
 
 # %% ---- 2026-10-12 ------------------------

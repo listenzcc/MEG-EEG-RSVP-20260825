@@ -150,5 +150,16 @@ run_check "group peak structure" ./python/check-peak-structure.py
 # 此时晚窗完全落在按键之前，用来排除"晚窗的 target 身份只是残余按键成分"。
 run_sh 12.peak-window-decode.sh "peak-window-decode (late window control)"
 
+# ---- 新增分析：投影后 target 试次的 quick vs slow 滑窗解码（2026-10-14）----
+# 两类都是 target 试次，按逐被试自己的反应时分成 quick / slow，沿时间滑窗解码
+# "epoch 在哪个时刻已经知道被试会答多快"。stage 12 的 --analysis rt 分支解的是
+# 同一个对比，但它的逐折曲线是 .txt，导出结果集不带，跨被试平均无从下手；本
+# stage 把曲线存成 csv，并补上跨被试的时间曲线、窗内检验与符号翻转簇置换检验。
+# peak-window-decode.py 未改动，默认参数与它一致，可互相校验。
+# 注意曲线峰落在按键时刻（0.41-0.55 s 与按键重合），唯一不能用按键解释的是
+# 0.10-0.20 s 那一段（本批所有被试 RT 的 5% 分位 >= 0.211 s）。
+# 成本：20 个被试各一次滑窗交叉验证，与 stage 6 同量级。
+run_sh 19.rt-sliding-decode.sh "rt-sliding-decode (quick vs slow, target trials)"
+
 # ---- 可选：主线 B（单试次性能），与图 1-7 无关 ----
 # ./7.eegnetv4-decode.sh

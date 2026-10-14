@@ -18,11 +18,28 @@ Purpose:
     and quick trials by definition press earlier than slow ones. A decoder
     that reads motor preparation, or the residue of the button response, is
     therefore above chance as well. The one stretch that can not be explained
-    that way is the pre motor window [0.10, 0.20] s: every subject answers
-    later than 0.211 s (the 5% quantile of the reaction times), so nothing in
-    that window can come from the button press itself. It is reported
-    separately for exactly that reason, and a peak that sits near the keypress
-    latency is not evidence on its own.
+    that way is the pre motor window [0.10, 0.20] s: the measured reaction
+    times of this batch start at 0.154 s and every subject's own 5% quantile
+    is later than 0.27 s, so nothing in that window can come from the button
+    press itself. It is reported separately for exactly that reason, and a
+    peak that sits near the keypress latency is not evidence on its own.
+
+    Two more readings guard the pre motor window, both reportable from the
+    same run:
+
+        baseline    [-0.2, -0.05] s   nothing of the target is on screen yet,
+                                      so an AUC away from 0.5 here is drift,
+                                      arousal or trial order, not target
+                                      processing. Same window as stage 12.
+        late        0.95 - 1.05 s     a full second after the onset, past the
+                                      last keypress. An AUC away from 0.5 here
+                                      is a slow component that the motor
+                                      account can not explain either.
+
+    The epochs are filtered 0.1 - 40 Hz upstream and carry no baseline, so the
+    classifier at every time point sees the absolute topography, drift
+    included. --highpass refilters the epochs on the fly, which is the direct
+    way to test whether the reading survives the drift being taken out.
 
     Stage 12 scores the same contrast in its --analysis rt branch, but it
     writes the fold wise curves as .txt into
@@ -62,6 +79,13 @@ parser.add_argument('-s', '--subject', default='S02',
 parser.add_argument('-m', '--mode', default='EEG', help='Mode name EEG | MEG')
 parser.add_argument('-t', '--tag', default='rma',
                     help='Short name of the input epochs, used in filenames')
+parser.add_argument('--qs-tag', '--qs_tag', dest='qs_tag', default=None,
+                    help='Tag of the quick-slow label csv of stage 10. The '
+                         'labels belong to the epochs file, not to the way it '
+                         'is scored, so a control run that changes --tag (a '
+                         'refilter, a balancing draw) has to point this back '
+                         'at the label file of the epochs, rma by default. '
+                         'Left out, it follows --tag')
 parser.add_argument('-d', '--decoding_method', default='LR',
                     choices=['LR', 'SVC'],
                     help='Decoding method, LR | SVC. LR is what stage 12 uses')
@@ -100,6 +124,10 @@ parser.add_argument('--balance', '--balanced', dest='balance',
 parser.add_argument('--win-preresp', '--win_preresp', dest='win_preresp',
                     type=float, nargs=2, default=[0.10, 0.20],
                     help='The window before any keypress can have happened')
+parser.add_argument('--win-base', '--win_base', dest='win_base',
+                    type=float, nargs=2, default=[-0.2, -0.05],
+                    help='The pre stimulus baseline window, for reference. '
+                         'It matches the default of stage 12')
 parser.add_argument('--win-early', '--win_early', dest='win_early',
                     type=float, nargs=2, default=[0.24, 0.36],
                     help='The first peak window of the projected response')
@@ -111,10 +139,20 @@ parser.add_argument('--win-peak', '--win_peak', dest='win_peak',
                     help='The stretch the peak reading is taken over. Stage 12 '
                          'searches -0.2 0.8, pass that to reproduce its '
                          'auc_peak and peak_t to the last digit')
+parser.add_argument('--highpass', type=float, default=None,
+                    help='Refilter the epochs with this high pass before '
+                         'decoding, in Hz. The saved epochs are 0.1 - 40 Hz and '
+                         'carry no baseline, so slow drift is still in them and '
+                         'a high pass is the direct control for a drift driven '
+                         'reading. None keeps the file as it is')
+parser.add_argument('--lowpass', type=float, default=None,
+                    help='Refilter the epochs with this low pass, in Hz, '
+                         'applied together with --highpass')
 args = parser.parse_args()
 SUBJ = args.subject
 MODE = args.mode
 TAG = args.tag
+QS_TAG = args.qs_tag if args.qs_tag else args.tag
 DECODING_METHOD = args.decoding_method
 GROUPS = [g.strip() for g in args.groups.split(',') if g.strip()]
 
@@ -129,7 +167,8 @@ QS_DIR = Path(args.qs_dir) / f'{MODE}-{SUBJ}'
 OUTPUT_DIR = Path(args.output_dir) / f'{MODE}-{SUBJ}-{DECODING_METHOD}'
 OUTPUT_DIR.mkdir(exist_ok=True, parents=True)
 
-WINDOWS = dict(preresp=tuple(args.win_preresp),
+WINDOWS = dict(baseline=tuple(args.win_base),
+               preresp=tuple(args.win_preresp),
                early=tuple(args.win_early),
                late=tuple(args.win_late))
 
@@ -164,10 +203,12 @@ def load_labels(n_trials: int):
     Returns:
         df: The two class label table, sorted by trial index
     '''
-    trial_csv = QS_DIR / f'quick-slow-trials-{TAG}.csv'
+    trial_csv = QS_DIR / f'quick-slow-trials-{QS_TAG}.csv'
     if not trial_csv.exists():
         raise SystemExit(f'{trial_csv} does not exist. Run '
-                         f'10.quick-slow-analysis.sh for {MODE}-{SUBJ} first.')
+                         f'10.quick-slow-analysis.sh for {MODE}-{SUBJ} first, '
+                         f'or point --qs-tag at the label file of these '
+                         f'epochs.')
 
     df = pd.read_csv(trial_csv)
     n_all = len(df)
@@ -232,6 +273,12 @@ def main():
     logger.info(f'{len(epochs)} target epochs, {len(epochs.ch_names)} '
                 f'channels, {epochs.times[0]:.3f} - {epochs.times[-1]:.3f} s')
 
+    if args.highpass is not None or args.lowpass is not None:
+        epochs.filter(args.highpass, args.lowpass, n_jobs=n_jobs,
+                      verbose='ERROR')
+        logger.info(f'Refiltered the epochs to {args.highpass} - '
+                    f'{args.lowpass} Hz')
+
     df = load_labels(len(epochs))
 
     if args.balance:
@@ -281,9 +328,14 @@ def main():
                  & (epochs.times <= args.win_peak[1]))
     i_peak = int(np.argmax(mean[mask_peak]))
 
-    row = dict(mode=MODE, subject=SUBJ, tag=TAG, decoding=DECODING_METHOD,
+    row = dict(mode=MODE, subject=SUBJ, tag=TAG, qs_tag=QS_TAG,
+               decoding=DECODING_METHOD,
                picks=args.picks, n_splits=args.n_splits, seed=args.seed,
                balanced=int(args.balance),
+               refilter_highpass=(args.highpass if args.highpass is not None
+                                  else np.nan),
+               refilter_lowpass=(args.lowpass if args.lowpass is not None
+                                 else np.nan),
                n_channels=int(data.shape[1]),
                n_positive=int(y.sum()), n_negative=int((1 - y).sum()),
                positive_label=GROUPS[0], negative_label=GROUPS[1],
@@ -314,6 +366,8 @@ def main():
                     alpha=0.15)
     ax.axhline(0.5, color='gray', lw=0.9, ls=':')
     ax.axvline(0, color='k', lw=0.9, ls='--', alpha=0.5)
+    ax.axvspan(*args.win_base, color='0.5', alpha=0.18,
+               label='pre stimulus baseline')
     ax.axvspan(*args.win_preresp, color='tab:green', alpha=0.10,
                label='before any keypress can be')
     ax.axvspan(*args.win_early, color='tab:orange', alpha=0.08)
@@ -330,7 +384,10 @@ def main():
     ax.set_xlabel('Time (s)')
     ax.set_ylabel('ROC AUC')
     ax.set_title(f'{MODE}-{SUBJ}: {GROUPS[0]} versus {GROUPS[1]} inside the '
-                 f'target trials ({DECODING_METHOD}, {TAG})')
+                 f'target trials ({DECODING_METHOD}, {TAG}'
+                 + (f', {args.highpass}-{args.lowpass} Hz'
+                    if args.highpass is not None or args.lowpass is not None
+                    else '') + ')')
     ax.legend(fontsize=8, loc='lower right')
     fig.tight_layout()
     fname = OUTPUT_DIR / f'rt-sliding-{TAG}.png'

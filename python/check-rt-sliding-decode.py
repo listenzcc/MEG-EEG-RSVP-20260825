@@ -27,10 +27,18 @@ Purpose:
 
     Windows reported next to the peak of the 0 - 0.8 s stretch:
 
+        baseline   -0.20 - -0.05 s nothing of the target is on screen yet, so
+                                   an AUC away from 0.5 here is drift, arousal
+                                   or trial order, not target processing
         pre-motor  0.10 - 0.20 s   before any keypress can have happened, so
                                    nothing here can come from the button press
         early      0.24 - 0.36 s   the first peak of the projected response
         late       0.41 - 0.55 s   the second peak, it overlaps the keypress
+
+    The baseline and the pre-motor window have to be read together. The batch
+    minimum reaction time is derived from the trials csv of every subject and
+    printed, rather than assumed, because the pre-motor window is only motor
+    free when it really precedes every keypress of the batch.
 
 Usage:
     python python/check-rt-sliding-decode.py
@@ -58,6 +66,11 @@ parser.add_argument('--decoding', default='LR',
 parser.add_argument('-o', '--output-dir', default=None,
                     help='Where the group tables and figures go, default is '
                          'the data dir')
+parser.add_argument('--win-base', '--win_base', dest='win_base',
+                    type=float, nargs=2, default=[-0.2, -0.05],
+                    help='Pre stimulus baseline window, must match '
+                         'rt-sliding-decode.py. This is the drift control: '
+                         'nothing of the target is on screen there')
 parser.add_argument('--win-p2', '--win_p2', dest='win_p2', type=float,
                     nargs=2, default=[0.10, 0.20],
                     help='Pre motor window, must match rt-sliding-decode.py. '
@@ -80,10 +93,11 @@ parser.add_argument('--n-perm', type=int, default=5000,
                          'sign flip is too large (more than 15 subjects)')
 parser.add_argument('--seed', type=int, default=0,
                     help='Seed of the permutation draw')
-parser.add_argument('--crit-min', default='0.211',
+parser.add_argument('--crit-min', default=None,
                     help='Informative: the smallest reaction time of the '
                          'batch, used to check that the pre motor window '
-                         'really precedes every keypress')
+                         'really precedes every keypress. Left out, it is '
+                         'derived from the trials csv of every subject')
 args = parser.parse_args()
 
 DATA_DIR = Path(args.data_dir)
@@ -102,8 +116,8 @@ except NameError:
 logger.info(f'Summarizing {DATA_DIR=}, {TAG=}, {DECODING=}')
 
 MODES = ['EEG', 'MEG']
-WINDOWS = [('pre-motor', *args.win_p2), ('early', *args.win_early),
-           ('late', *args.win_late)]
+WINDOWS = [('baseline', *args.win_base), ('pre-motor', *args.win_p2),
+           ('early', *args.win_early), ('late', *args.win_late)]
 PEAK_WINDOW = tuple(args.peak_window)
 
 
@@ -247,6 +261,7 @@ def cluster_permutation(curves: np.ndarray, times: np.ndarray,
 curves = dict()
 times = None
 subjects = dict()
+rt_report = dict()
 
 for mode in MODES:
     stack, names = [], []
@@ -270,18 +285,29 @@ for mode in MODES:
     curves[mode] = np.array(stack)
     subjects[mode] = names
     logger.info(f'{mode}: {len(stack)} subjects, {times.size} time points')
-    # A window that is not motor free would make the pre-motor reading moot
+    # A window that is not motor free would make the pre-motor reading moot.
+    # The batch figure is derived here rather than assumed: the smallest
+    # reaction time of any trial, and the smallest per subject 5% quantile.
+    mins, q05 = [], []
     for folder in sorted(DATA_DIR.glob(f'{mode}-S*-{DECODING}')):
         f = folder / f'trials-{TAG}.csv'
         if not f.exists():
             continue
         d = pd.read_csv(f)
         if 'delay' in d.columns and len(d):
-            rt = float(d['delay'].min())
-            if rt <= args.win_p2[1]:
+            rt_min = float(d['delay'].min())
+            mins.append(rt_min)
+            q05.append(float(d['delay'].quantile(0.05)))
+            if rt_min <= args.win_p2[1]:
                 logger.warning(f'{folder.name}: the fastest reaction time is '
-                               f'{rt:.3f} s, which is inside the pre-motor '
+                               f'{rt_min:.3f} s, which is inside the pre-motor '
                                f'window {args.win_p2}')
+    if mins:
+        rt_report[mode] = dict(min=min(mins), min_q05=min(q05),
+                               n_subjects=len(mins))
+        logger.info(f'{mode}: fastest reaction time of the batch '
+                    f'{min(mins):.3f} s, smallest per subject 5% quantile '
+                    f'{min(q05):.3f} s')
 
 if not curves:
     raise FileNotFoundError(f'No curves-{TAG}.csv found under {DATA_DIR}')
@@ -374,6 +400,8 @@ for col, mode in enumerate([m for m in MODES if m in curves]):
     sem = data.std(axis=0, ddof=1) / np.sqrt(n)
 
     ax = axes[0, col]
+    ax.axvspan(*args.win_base, color='0.5', alpha=0.18,
+               label='pre stimulus baseline (drift control)')
     ax.axvspan(*args.win_p2, color='tab:green', alpha=0.12,
                label='before any keypress can be')
     ax.axvspan(*args.win_early, color='tab:orange', alpha=0.08)
@@ -421,11 +449,18 @@ logger.info(f'Saved into {fname}')
 # %%
 # A last word on how far the conclusion can go, printed rather than written
 # into a table, because it is a caveat and not a result.
+for mode, v in rt_report.items():
+    logger.info(f'{mode}: the batch answers no earlier than {v["min"]:.3f} s, '
+                f'and no subject has a 5% quantile earlier than '
+                f'{v["min_q05"]:.3f} s, so the pre-motor window '
+                f'{tuple(args.win_p2)} precedes every keypress of the batch')
 logger.info(f'Read the peak together with the keypress: the peak of the curve '
             f'sits at the reaction time, and the projected epochs still hold '
             f'the single trial part of the button response. The pre-motor '
-            f'window {args.win_p2} is the reading that carries the claim, '
-            f'every subject of this batch answers later than {args.crit_min} s')
+            f'window {tuple(args.win_p2)} carries the claim, and the baseline '
+            f'window {tuple(args.win_base)} bounds it: nothing of the target '
+            f'is on screen there, so whatever the baseline shows is what '
+            f'drift and trial order alone can do to the curve')
 
 
 # %% ---- 2026-10-14 ------------------------

@@ -161,5 +161,17 @@ run_sh 12.peak-window-decode.sh "peak-window-decode (late window control)"
 # 成本：20 个被试各一次滑窗交叉验证，与 stage 6 同量级。
 run_sh 19.rt-sliding-decode.sh "rt-sliding-decode (quick vs slow, target trials)"
 
+# ---- 新增分析：连续反应时回归（2026-10-15）----
+# 与 stage 19 解同一个问题，但不再把试次二分：把反应时当连续变量，在每个时间点
+# 上跨试次回归，同时把按键锁时响应作为基函数放进同一个设计矩阵，从而在统计上
+# 分离「与加工速度相关的成分」与「按键动作本身」。
+# 与 stage 19 的关系：19 的 quick/slow 二分依赖一条落在 RT 分布空窗里的分界线
+# （MEG 十名被试最概然 RT 都是 0.4117 s），标签接近二值；本 stage 不依赖分界线。
+# 可识别性是本 stage 的核心产物，不是附加检查：最早一次按键之前 rt 列干净
+# （clean 段），之后 rt 与 button 基函数描述同一份方差（mixed 段几乎必然
+# 不可识别）。只有 clean 段的系数能写进论文。合成沙盒已验证 clean 段
+# gain 1.00 / corr 0.96、leak == null，量化 RT 场景 mixed 段被判不可识别。
+run_sh 20.rt-regression.sh "rt-regression (continuous RT, epochs model)"
+
 # ---- 可选：主线 B（单试次性能），与图 1-7 无关 ----
 # ./7.eegnetv4-decode.sh

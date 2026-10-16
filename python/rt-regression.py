@@ -646,7 +646,12 @@ def simulate_recovery(data: np.ndarray, X: np.ndarray, rt: np.ndarray,
                 continue
             for c in range(n_ch):
                 a, b = got[c][mask], want[c][mask]
-                if np.std(a) > 1e-12 and np.std(b) > 1e-12:
+                # The threshold has to be relative. MEG is carried in
+                # tesla and its standard deviation is far below 1e-12, so an
+                # absolute test silently drops every channel and reports an
+                # empty correlation.
+                floor = 1e-12 * max(np.std(want[c][mask]), 1.0)
+                if np.std(a) > floor and np.std(b) > floor:
                     corr[part].append(np.corrcoef(a, b)[0, 1])
             num = np.sum(got[:, mask] * want[:, mask])
             den = np.sum(want[:, mask] ** 2)

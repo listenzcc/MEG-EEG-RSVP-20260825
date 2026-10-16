@@ -235,7 +235,7 @@ for (mode, subj), v in loaded.items():
     cur = v['curve']
     rows.append(dict(
         mode=mode, subject=subj,
-        n_trials=a.get('rt_n', np.nan),
+        n_trials=a.get('n_trials', np.nan),
         rt_median_s=a.get('rt_median', np.nan),
         rt_n_unique=a.get('rt_n_unique', np.nan),
         rt_modal_share=a.get('rt_modal_share', np.nan),
@@ -336,12 +336,15 @@ clusters = pd.DataFrame(cluster_rows)
 clusters.to_csv(OUTPUT_DIR / f'group-rt-regression-clusters-{TAG}.csv',
                 index=False)
 
-# %% ---- 2026-10-15 ------------------------
-# Figure
-n_mode = sum(1 for m in MODES if m in curves and len(curves[m]))
-fig, axes = plt.subplots(n_mode, 1, figsize=(9, 3.2 * n_mode), sharex=True,
+# %% ---- 2026-10-16 ------------------------
+# Figure. One curve panel per modality plus, below it, the per subject window
+# means, so the sign consistency behind the window tests can be seen directly.
+plot_modes = [m for m in MODES if m in curves and len(curves[m])]
+fig, axes = plt.subplots(2 * len(plot_modes), 1,
+                         figsize=(9, 2.5 * len(plot_modes) + 1.4),
                          squeeze=False)
-for ax, mode in zip(axes[:, 0], [m for m in MODES if m in curves]):
+for row, mode in enumerate(plot_modes):
+    ax = axes[2 * row, 0]
     C = curves[mode]
     mean = np.nanmean(C, axis=0)
     sem = stats.sem(C, axis=0, nan_policy='omit')
@@ -355,7 +358,7 @@ for ax, mode in zip(axes[:, 0], [m for m in MODES if m in curves]):
     ax.axvspan(times[0], limit, color='green', alpha=0.06)
     ax.axvspan(limit, times[-1], color='red', alpha=0.06)
     ax.axvline(limit, color='r', lw=0.9, ls='--')
-    ax.annotate(f'slowest first press {limit:.2f} s', xy=(limit, ax.get_ylim()
+    ax.annotate(f'earliest press {limit:.2f} s', xy=(limit, ax.get_ylim()
                                                           [1] * 0.9),
                 fontsize=7, color='r')
 
@@ -377,6 +380,32 @@ for ax, mode in zip(axes[:, 0], [m for m in MODES if m in curves]):
     ax.set_title(f'{mode}: reaction time coefficient, {TAG}\n'
                  f'green: before any press, red: press already possible')
     ax.legend(fontsize=7, loc='upper left')
+
+    # Per subject window means, horizontal bars ordered by value
+    axb = axes[2 * row + 1, 0]
+    wvals = []
+    for s in SUBJECTS:
+        cur = loaded[(mode, s)].get('curve')
+        if cur is None:
+            continue
+        m = ((cur['time'] >= args.win_pre[0])
+             & (cur['time'] <= args.win_pre[1]))
+        wvals.append((s, float(np.nanmean(cur['beta_rt_proj'][m]))))
+    wvals.sort(key=lambda x: x[1])
+    names = [w[0] for w in wvals]
+    vals = np.array([w[1] for w in wvals])
+    colors = ['C3' if v < 0 else 'C0' for v in vals]
+    axb.barh(range(len(vals)), vals, color=colors, height=0.62)
+    axb.set_yticks(range(len(vals)))
+    axb.set_yticklabels(names, fontsize=6)
+    axb.axvline(0, color='k', lw=0.6)
+    med = float(np.nanmedian(vals))
+    axb.axvline(med, color='k', lw=0.9, ls=':')
+    axb.annotate(f'median {med:+.3f}', xy=(med, len(vals) - 0.3), fontsize=7)
+    axb.set_ylabel(f'{mode} pre-motor window mean')
+    if row == 0:
+        axb.set_title('per subject mean of beta RT in the pre-motor window '
+                      '0.10-0.20 s')
 axes[-1, 0].set_xlabel('time from target onset (s)')
 fig.tight_layout()
 fig.savefig(OUTPUT_DIR / f'group-rt-regression-{TAG}.png', dpi=130)

@@ -34,6 +34,7 @@ import os
 import re
 import struct
 import sys
+import xml.etree.ElementTree as ET
 import zipfile
 from html.parser import HTMLParser
 
@@ -127,6 +128,18 @@ def find(node, tag):
 # ---------------------------------------------------------------- text utils
 def esc(text):
     return (text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+
+
+def esc_attr(text):
+    """
+    Escape text that goes into an attribute value.
+
+    A bare quotation mark inside an attribute value closes it early, and from
+    that point on the document is not well formed: Word opens it with a repair
+    prompt or reports it as damaged. Everything that lands in an attribute has
+    to go through this function rather than esc().
+    """
+    return esc(text).replace('"', "&quot;").replace("'", "&apos;")
 
 
 def norm(text):
@@ -484,7 +497,13 @@ def img_xml(rid, cx, cy, name, docpr_id):
     Inline rather than anchored: it flows with the text, so a picture can
     never end up behind a paragraph or on top of the footer the way a floating
     one does.
+
+    The picture name comes from the caption in the html alt attribute. It is
+    only a label for the editing UI, so it is truncated, and it goes through
+    esc_attr: captions carry quotation marks, and a bare one inside the
+    attribute breaks the xml.
     """
+    label = esc_attr(name[:60])
     pic = ("<pic:pic><pic:nvPicPr>"
            '<pic:cNvPr id="%d" name="%s"/><pic:cNvPicPr/>'
            "</pic:nvPicPr>"
@@ -493,17 +512,17 @@ def img_xml(rid, cx, cy, name, docpr_id):
            '<pic:spPr><a:xfrm><a:off x="0" y="0"/>'
            '<a:ext cx="%d" cy="%d"/></a:xfrm>'
            '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>'
-           "</pic:pic>" % (docpr_id, esc(name), rid, cx, cy))
+           "</pic:pic>" % (docpr_id, label, rid, cx, cy))
     drawing = ('<w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0">'
                '<wp:extent cx="%d" cy="%d"/>'
                '<wp:effectExtent l="0" t="0" r="0" b="0"/>'
-               '<wp:docPr id="%d" name="%s"/>'
+               '<wp:docPr id="%d" name="%s"/>'  # label, already attribute safe
                '<wp:cNvGraphicFramePr>'
                '<a:graphicFrameLocks noChangeAspect="1"/>'
                "</wp:cNvGraphicFramePr>"
                '<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org'
                '/drawingml/2006/picture">%s</a:graphicData></a:graphic>'
-               "</wp:inline></w:drawing>" % (cx, cy, docpr_id, esc(name), pic))
+               "</wp:inline></w:drawing>" % (cx, cy, docpr_id, label, pic))
     return ('<w:p><w:pPr>'
             # The children of pPr are ordered by the schema: keepNext comes
             # before spacing, and spacing before jc. Word is strict about it.
@@ -972,7 +991,18 @@ def convert(html_path, docx_path):
     builder.walk(body)
 
     title = "RSVP 目标识别分析报告"
+    got = re.search(r"<title>(.*?)</title>", raw, re.S)
+    if got:
+        title = norm(esc(got.group(1))) or title
     doc = document_xml(builder.blocks)
+
+    # A bare quotation mark inside an attribute slips through every other
+    # check and leaves a package that Word refuses to open, so the part is
+    # parsed here. Failing at build time is cheaper than a damaged document.
+    try:
+        ET.fromstring(doc)
+    except ET.ParseError as exc:
+        raise SystemExit("document.xml 不是良构 XML（%s），未写出 docx" % exc)
 
     with zipfile.ZipFile(docx_path, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("[Content_Types].xml", content_types(builder.images))

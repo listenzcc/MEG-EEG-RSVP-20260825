@@ -171,6 +171,38 @@ OUTPUT_DIR.mkdir(exist_ok=True, parents=True)
 
 EPS = 1e-12
 
+# The data of the two modalities differ by eight orders of magnitude, one is
+# in tesla and the other in volt. Every threshold further down is an absolute
+# number, so the data are carried in the unit they are reported in: fT for
+# MEG and uV for EEG
+UNIT_SCALE = dict(eeg=1e6, mag=1e15, grad=1e13)
+
+
+def to_report_unit(X: np.ndarray, ch_types):
+    '''
+    Bring the data into the unit it is reported in.
+
+    Args:
+        X: (n_trials, n_channels, n_times) data as read from the file
+        ch_types: The channel types, mne names like eeg, mag, grad
+
+    Returns:
+        out: The same array multiplied per channel type
+    '''
+    factor = np.array([UNIT_SCALE.get(t, 1.0) for t in ch_types])
+    # The table is a guess about the unit the file happens to be in: a CTF
+    # axial gradiometer is stored in tesla but may be labelled grad, which
+    # would pick the wrong factor. Rather than trust it, the factor is only
+    # kept when it brings the data near one; otherwise the data are brought
+    # there by their own size, which costs the physical unit and nothing
+    # that matters downstream, since every reading is a ratio
+    median = float(np.median(np.abs(X)))
+    if median > 0.0 and not 1e-3 < median * float(factor.mean()) < 1e3:
+        factor = factor / (median * float(factor.mean()))
+        logger.info(f'the data do not sit in the unit the channel type '
+                    f'suggests, scaled by 1 / {median:.3g} instead')
+    return X * factor[None, :, None]
+
 
 # %% ---- 2026-10-21 ------------------------
 # Function and class
@@ -225,7 +257,7 @@ def fit_one(X_t: np.ndarray, y: np.ndarray):
         pattern = w_raw
 
     norm = float(np.linalg.norm(pattern))
-    if norm < EPS:
+    if not np.isfinite(norm) or norm <= 0.0:
         return np.zeros_like(pattern), 0.0
     return pattern, norm
 
@@ -367,8 +399,8 @@ def main():
             raise SystemExit(f'{MODE}-{SUBJ}: the two epochs files do not '
                              f'share a time axis')
 
-        X_pos = epochs_pos.get_data(picks=picks)
-        X_neg = epochs_neg.get_data(picks=picks)
+        X_pos = to_report_unit(epochs_pos.get_data(picks=picks), ch_types)
+        X_neg = to_report_unit(epochs_neg.get_data(picks=picks), ch_types)
         # The average difference keeps every trial, the balancing below only
         # touches what the classifier sees
         diff = X_pos.mean(axis=0) - X_neg.mean(axis=0)
@@ -386,7 +418,7 @@ def main():
 
     else:
         df = load_rt_labels(len(epochs_pos))
-        X_all = epochs_pos.get_data(picks=picks)
+        X_all = to_report_unit(epochs_pos.get_data(picks=picks), ch_types)
         y_all = (df['group'] == GROUPS[0]).to_numpy().astype(int)
         index = df['index'].to_numpy()
         X_all = X_all[index]
@@ -434,7 +466,7 @@ def main():
         raise SystemExit('No time point inside --t-min / --t-max')
 
     unit = np.zeros_like(patterns)
-    good = norms > EPS
+    good = np.isfinite(norms) & (norms > 0.0)
     unit[good] = patterns[good] / norms[good, None]
 
     def save(mat, name):
@@ -448,8 +480,10 @@ def main():
     save(unit, 'patterns-unit')
     save(diff.T, 'diff')
 
-    df = pd.DataFrame(dict(time=np.round(times[idx], 6),
-                           norm=np.round(norms[idx], 8)))
+    # The norm is left unrounded: rounding it to eight decimals turns a MEG
+    # pattern in tesla into zero, and float_format below already keeps six
+    # significant digits
+    df = pd.DataFrame(dict(time=np.round(times[idx], 6), norm=norms[idx]))
     path = OUTPUT_DIR / f'norm-{ANALYSIS}-{TAG}.csv'
     df.to_csv(path, index=False, float_format='%.6g')
     logger.info(f'Saved into {path}')
@@ -465,6 +499,7 @@ def main():
                seed=args.seed, n_channels=len(ch_names),
                n_positive=int(y.sum()), n_negative=int((1 - y).sum()),
                n_times=int(len(idx)),
+               data_unit=','.join(sorted({t for t in ch_types})),
                refilter_highpass=(args.highpass if args.highpass is not None
                                   else np.nan),
                refilter_lowpass=(args.lowpass if args.lowpass is not None

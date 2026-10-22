@@ -201,6 +201,23 @@ def complete_grad_pairs(names, types):
     return [i for i in range(len(names)) if i not in drop]
 
 
+def min_positive(a: np.ndarray):
+    '''
+    A floor for a colour limit, taken from the data itself.
+
+    An absolute floor would mean different things for MEG and EEG, which are
+    read eight orders of magnitude apart.
+
+    Args:
+        a: The values that are about to be coloured
+
+    Returns:
+        out: The smallest positive value, or 1 when there is none
+    '''
+    pos = a[np.isfinite(a) & (a > 0.0)]
+    return float(pos.min()) if pos.size else 1.0
+
+
 def unit_vector(v: np.ndarray, axis: int = -1):
     '''
     Scale a vector to unit length, leaving a zero vector alone.
@@ -213,7 +230,10 @@ def unit_vector(v: np.ndarray, axis: int = -1):
         out: The scaled array, and the norm before scaling
     '''
     n = np.linalg.norm(v, axis=axis, keepdims=True)
-    n = np.where(n < EPS, 1.0, n)
+    # A zero vector keeps its zero length instead of turning into NaN; the
+    # test is relative to the data itself, the two modalities are read in
+    # units eight orders of magnitude apart
+    n = np.where(n > 0.0, n, 1.0)
     return v / n, np.linalg.norm(v, axis=axis)
 
 
@@ -240,7 +260,7 @@ def split_half(mats: np.ndarray, n_rep: int, rng):
         b = mats[perm[half:2 * half]].mean(axis=0)
         a, na = unit_vector(a)
         b, nb = unit_vector(b)
-        ok = (na > EPS) & (nb > EPS)
+        ok = (na > 0.0) & (nb > 0.0)
         c = np.zeros(mats.shape[1])
         c[ok] = np.sum(a[ok] * b[ok], axis=1)
         r += c
@@ -481,7 +501,7 @@ def main():
             data = shape[:, idx]
             vlim = float(np.quantile(np.abs(data[i_draw]),
                                      args.vlim_quantile))
-            vlim = max(vlim, EPS)
+            vlim = max(vlim, min_positive(np.abs(data[i_draw])))
             draw_maps(fig, gs, block * n_blocks, n_cols, data[i_draw],
                       times_draw, info_t, t, vlim, f'{MODE} {t} ',
                       annotate=r_by_type[t][i_draw])
@@ -521,12 +541,13 @@ def main():
                     # the shape is wanted, so the window average is scaled
                     # back to unit length the same way a single map is
                     n = np.linalg.norm(m)
-                    if n > EPS:
+                    if n > 0.0:
                         m = m / n
                 win_data.append(m)
             win_data = np.array(win_data)
-            vlim = float(np.quantile(np.abs(win_data),
-                                     args.vlim_quantile)) or EPS
+            vlim = float(np.quantile(np.abs(win_data), args.vlim_quantile))
+            if not np.isfinite(vlim) or vlim <= 0.0:
+                vlim = min_positive(np.abs(win_data))
             for j, (name, w) in enumerate(WINDOWS.items()):
                 ax = axes[row, j]
                 mne.viz.plot_topomap(win_data[j], pos=info_t, ch_type=t,

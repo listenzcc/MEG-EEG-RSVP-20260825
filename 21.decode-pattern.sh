@@ -21,7 +21,11 @@
 #      可调，0 为不平滑）。解码的 ERP 成分本身就是几十 ms 宽，这一步不损失
 #      真实的时间分辨率。
 #   3. 逐时间点估计的被试间一致性由 split-half 相关给出，图上每个时刻下方
-#      标注；一致性低的时刻，地形图不宜单独解读。
+#      标注；一致性低的时刻，地形图不宜单独解读。`check-pattern-agreement.py`
+#      把这条一致性做成检验：逐时刻算被试间平均拓扑的长度，用逐被试翻转符号
+#      造零分布（随机符号下这个长度落在 1/sqrt(N) 而不是 0），沿线做簇置换。
+#      它同时给窗与窗之间的分裂半余弦——同一批被试的平均会共享噪声、把余弦
+#      抬向 1，分半之后才看得出两个窗是不是同一个形状（负值＝翻号）。
 #
 # 依赖：stage 3 的投影后 epochs（epochs-{1,2}-notch-removal-artificial-epo.fif）
 #       与 stage 10 的 quick-slow-trials-rma.csv
@@ -39,6 +43,10 @@
 #         group-decode-pattern-{target,rt}-rma-{EEG,MEG}.csv        群体 pattern
 #         group-decode-pattern-{target,rt}-rma-summary.csv          窗读数
 #       --kind diff 另出一套同名文件，画的是平均差而不是 pattern。
+#       check-pattern-agreement.py 另出：
+#         group-pattern-agreement-{analysis}-rma-{MODE}.png        一致性 + 窗间余弦
+#         group-pattern-agreement-*.csv                            逐时刻一致性、簇、p
+#         group-pattern-window-cos-*.csv                           四窗之间的分裂半余弦
 #
 # 成本：每个被试在每个时间点拟合一次 logistic regression，并算一次通道协方差。
 #       MEG 通道多，20 被试 x 2 对比的量级与 stage 6 的滑窗交叉验证相当。
@@ -53,6 +61,7 @@ python --version
 
 script=./python/decode-pattern.py
 check=./python/check-decode-pattern.py
+agree=./python/check-pattern-agreement.py
 subjects=(S01 S02 S03 S04 S05 S06 S07 S08 S09 S10)
 
 # ---- 逐被试：两个对比、两个模态 ----
@@ -69,6 +78,11 @@ for analysis in target rt; do
     for kind in pattern diff; do
         python $check --analysis $analysis --tag rma --kind $kind
     done
+done
+
+# ---- 群体：一致性检验与窗间余弦 ----
+for analysis in target rt; do
+    python $agree --analysis $analysis --tag rma
 done
 
 # ---- 可选 ----
@@ -89,6 +103,10 @@ done
 #     --times 0.05,0.10,0.15,0.20,0.25,0.30,0.35
 # python $check --analysis rt --tag rma --kind pattern --win-early 0.20 0.32
 #
-# ④ target 对比改为不抽平（non-target 试次远多于 target，默认抽平）：
+# ④ 只读一个模态，或换窗（窗同时决定簇检验之外的窗读数）：
+# python $agree --analysis rt --tag rma --modes EEG
+# python $agree --analysis rt --tag rma --win-early 0.20 0.32
+#
+# ⑤ target 对比改为不抽平（non-target 试次远多于 target，默认抽平）：
 # python $script -m EEG -s S01 --analysis target --no-balance \
 #     -o output/decode-pattern-full

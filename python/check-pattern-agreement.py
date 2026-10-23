@@ -462,11 +462,26 @@ def main():
                    label=f'cluster threshold ({thr:.2f})')
         ax.axhline(floor, color='tab:blue', lw=0.9, ls='-.',
                    label=f'no shared shape ({floor:.2f})')
-        for start, stop, mass, p in clusters:
+        # The clusters are labelled by mass, largest first, and only the
+        # ones wide enough to point at are labelled at all: a cluster of two
+        # neighbouring samples has no room for a number above it, and left
+        # in the labels of the narrow ones run into each other
+        placed = []
+        for start, stop, mass, p in sorted(clusters, key=lambda c: -c[2]):
+            width = times_ref[stop - 1] - times_ref[start]
+            significant = p < args.alpha
             ax.axvspan(times_ref[start], times_ref[stop - 1], color='tab:red',
-                       alpha=0.12)
-            ax.text(np.mean([times_ref[start], times_ref[stop - 1]]), 0.97,
-                    f'p = {p:.3f}', fontsize=8, color='tab:red', va='top',
+                       alpha=0.16 if significant else 0.06)
+            if width < 0.03 or len(placed) >= 3:
+                continue
+            centre = float(np.mean([times_ref[start], times_ref[stop - 1]]))
+            level = 0.97
+            for c, n in placed:
+                if abs(c - centre) < 0.17:
+                    level = n - 0.10
+            placed.append((centre, level))
+            ax.text(centre, level, f'p = {p:.3f}', fontsize=8,
+                    color='tab:red' if significant else '0.45', va='top',
                     ha='center')
         for name, w in WINDOWS.items():
             ax.axvspan(*w, color='0.5', alpha=0.10)

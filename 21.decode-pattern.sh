@@ -48,6 +48,11 @@
 #         group-pattern-agreement-*.csv                            逐时刻一致性、簇、p
 #         group-pattern-window-cos-*.csv                           四窗之间的分裂半余弦
 #
+# 单位：两模态的数据量纲差八个数量级（MEG 以特斯拉、EEG 以伏存储）。取数后统一
+#       换算到报告单位（mag x1e15 -> fT、eeg x1e6 -> uV），判据一律用"小于等于零
+#       或非有限"。不换算时 Haufe pattern 的模落在 1e-14，会被判成零、整段导成 0，
+#       MEG 首版产物就是这么全空的。
+#
 # 成本：每个被试在每个时间点拟合一次 logistic regression，并算一次通道协方差。
 #       MEG 通道多，20 被试 x 2 对比的量级与 stage 6 的滑窗交叉验证相当。
 

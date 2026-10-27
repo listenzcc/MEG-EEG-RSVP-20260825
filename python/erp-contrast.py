@@ -14,7 +14,11 @@ Purpose:
       3. 只有 5 帧，成分的时间演化看不出来；
       4. 投影前与投影后分成两张图，色标各自缩放，无法目测削减了多少。
 
-    本脚本固定时间网格、两列共享色标、下排换成 GFP 与高负荷通道波形。
+    本脚本固定时间网格、两行（投影前 / 后）上下对看、下排换成 GFP 与高负荷通道波形。
+
+    色标默认每行各自缩放（--scale per-row）：投影后的幅度只有投影前的两到三成，
+    共用色标会把投影后的形状压成一片白。各自缩放之后，削减量由行标题上的
+    vmax 与两行 vmax 之比标出，形状与量级都不丢。若要回到共用色标用 --scale shared。
 
 Inputs:
     output/ERP/{MODE}/all-1-{suffix}-ave.ave.fif        target 群体加权平均
@@ -32,7 +36,9 @@ Usage:
 
 Notes:
     - 带通沿用 stage 5 的 0.1-5 Hz，基线沿用 (-0.2, 0) s，与已有图可比。
-    - 两列共享色标是刻意的：投影后的幅度本来就该看着小，这才是要传达的信息。
+    - 色标默认每行各自缩放（--scale per-row）。投影后的幅度只有投影前的两到三成，
+      共用色标会让投影后的形状看不出来；削减量改由行标题上的 vmax 与比值给出。
+      要目测削减多少时用 --scale shared。
     - 单位按通道类型换算（EEG -> uV，mag -> fT，grad -> fT/cm），图上标注。
     - 图内文字用英文，避免服务器缺中文字体。
 """
@@ -97,6 +103,9 @@ parser.add_argument('--xlim', type=float, nargs=2, default=[-0.2, 0.9],
 parser.add_argument('--dpi', type=int, default=150)
 parser.add_argument('--vlim-percentile', type=float, default=99.0,
                     help='色标取 |值| 的哪个分位数，越小越不容易被单个极值压平')
+parser.add_argument('--scale', default='per-row', choices=['per-row', 'shared'],
+                    help='per-row：投影前后各行按自身数据定色标（默认，投影后形状可见）；'
+                         'shared：两行共用一个色标，深浅可直接比幅度')
 parser.add_argument('--no-sensors', action='store_true',
                     help='地形图上不画传感器点（MEG 272 点太密时用）')
 args = parser.parse_args()
@@ -191,37 +200,50 @@ def draw(fname, analysis, frames, info, unit_label, frame_times, all_times,
     """
     画一张对照图。
     行 1：投影前地形图序列
-    行 2：投影后地形图序列（与行 1 同色标、同时刻，可直接上下对看）
+    行 2：投影后地形图序列（与行 1 同时刻，可直接上下对看）
     行 3：GFP
     行 4：高负荷通道波形（颜色区分通道，实线投影前、虚线投影后）
+
+    色标：--scale per-row 时每行按自身数据定标，行标题上写 vmax 与两行之比；
+    shared 时两行共用一个色标。
     """
     n_frame = len(frame_times)
     per_frame = 1.55
     fig_w = 1.7 + per_frame * n_frame
     fig_h = per_frame * 2 + 3.7
     fig = plt.figure(figsize=(fig_w, fig_h))
+    right = 0.925 if args.scale == 'shared' else 0.955
     outer = fig.add_gridspec(
-        4, 1, height_ratios=[per_frame, per_frame, 1.95, 1.75], hspace=0.34,
-        left=0.055, right=0.90, top=0.895, bottom=0.075)
+        4, 1, height_ratios=[per_frame, per_frame, 1.95, 1.75], hspace=0.52,
+        left=0.055, right=right, top=0.885, bottom=0.075)
 
-    # 共享色标：跨两行、跨全部帧一起取分位数
-    stack = [frames[tag][:, [nearest(all_times, t) for t in frame_times]]
-             for tag, _, _ in SPECS]
-    stack = np.concatenate(stack, axis=1)
-    vmax = float(np.percentile(np.abs(stack), args.vlim_percentile)) or 1.0
-    vlim = (-vmax, vmax)
-    logger.info(f'vlim = +/-{vmax:.4g} {unit_label} '
-                f'(p{args.vlim_percentile:g} of |value|, both rows)')
+    def frame_stack(tag):
+        return frames[tag][:, [nearest(all_times, t) for t in frame_times]]
 
-    sm = ScalarMappable(norm=Normalize(*vlim), cmap='RdBu_r')
-    sm.set_array([])
-    cax = fig.add_axes([0.925, 0.70, 0.012, 0.19])
-    cb = fig.colorbar(sm, cax=cax)
-    cb.set_label(f'{unit_label}', fontsize=9)
-    cb.ax.tick_params(labelsize=8)
+    def vmax_of(tag):
+        v = float(np.percentile(np.abs(frame_stack(tag)),
+                                args.vlim_percentile))
+        return v or 1.0
 
+    vmaxes = {tag: vmax_of(tag) for tag, _, _ in SPECS}
+    if args.scale == 'shared':
+        shared = max(vmaxes.values())
+        vmaxes = {tag: shared for tag in vmaxes}
+        logger.info(f'vlim = +/-{shared:.4g} {unit_label} '
+                    f'(p{args.vlim_percentile:g}, both rows)')
+    else:
+        a, b = vmaxes['norp'], vmaxes['rma']
+        logger.info(f'vlim per row: before +/-{a:.4g}, after +/-{b:.4g} '
+                    f'{unit_label} (p{args.vlim_percentile:g}; '
+                    f'after / before = {b / a:.3f})')
+
+    # 每行的色标放在该行最右侧；shared 时两行数值相同，仍各画一个便于读刻度
     for row, (tag, _, label) in enumerate(SPECS):
-        inner = outer[row].subgridspec(1, n_frame, wspace=0.04)
+        vmax = vmaxes[tag]
+        vlim = (-vmax, vmax)
+        widths = [1.0] * n_frame + [0.11]
+        inner = outer[row].subgridspec(1, n_frame + 1, width_ratios=widths,
+                                       wspace=0.04)
         d = frames[tag]
         for i, t in enumerate(frame_times):
             ax = fig.add_subplot(inner[0, i])
@@ -229,8 +251,20 @@ def draw(fname, analysis, frames, info, unit_label, frame_times, all_times,
                 d[:, nearest(all_times, t)], info, axes=ax, show=False,
                 vlim=vlim, cmap='RdBu_r', contours=0,
                 sensors=False if args.no_sensors else 'k.', res=64)
-            ax.set_title(f'{t:.2f} s' if i else f'{label}\n{t:.2f} s',
-                         fontsize=9, pad=3)
+            if i == 0:
+                head = f'{label}\nvmax {vmax:.3g} {unit_label}'
+                if args.scale == 'per-row' and tag == 'rma':
+                    head += f'  ({vmax / vmaxes["norp"]:.2f}x before)'
+            else:
+                head = f'{t:.2f} s'
+            ax.set_title(head, fontsize=8.5, pad=3)
+
+        cax = fig.add_subplot(inner[0, n_frame])
+        sm = ScalarMappable(norm=Normalize(*vlim), cmap='RdBu_r')
+        sm.set_array([])
+        cb = fig.colorbar(sm, cax=cax, orientation='vertical')
+        cb.set_label(unit_label, fontsize=9)
+        cb.ax.tick_params(labelsize=8)
 
     low = outer[2:].subgridspec(2, 1, hspace=0.55)
     t = all_times

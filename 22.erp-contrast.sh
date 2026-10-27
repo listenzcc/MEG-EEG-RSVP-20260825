@@ -13,7 +13,12 @@
 #     4. 投影前后分两张图、各自缩放色标，目测不出削减了多少。
 #
 # 本 stage 固定时间网格（默认 0.10–0.58 s，步长 0.08，7 帧）、
-# 投影前与投影后共用同一色标、下排换成 GFP 与高负荷通道波形。
+# 下排换成 GFP 与高负荷通道波形。
+#
+# 色标（10-27 改）：默认每行各自缩放（--scale per-row）。投影后的幅度只有
+# 投影前的两到三成，共用色标会把投影后的地形图压成一片白。各自缩放之后，
+# 削减量由行标题上的 vmax 与「(0.xx x before)」标出。要目测削减多少改用
+# --scale shared。
 #
 # 依赖：stage 5 的 ave.fif（output/ERP/{MODE}/all-{1,2}-{suffix}-ave.ave.fif）；
 #       若缺，脚本自动从 output/epochs 的逐被试 epochs 按试次数加权重算。
@@ -24,7 +29,8 @@
 #   output/ERP/EEG/erp-contrast-diff-EEG.png      target - non-target
 #   output/ERP/MEG/erp-contrast-target-MEG.png
 #   output/ERP/MEG/erp-contrast-diff-MEG.png
-# 日志里逐帧打印 GFP 与 max|ch|，写稿直接引用。
+# 日志里逐帧打印 GFP 与 max|ch|、两行色标的 vmax 与比值，写稿直接引用。
+# 只有 png 时正文引不了精确数，务必把 stdout 存下来一起拷回。
 #
 # 口径提醒：
 #   - 带通 0.1–5 Hz、基线 (-0.2, 0) s，沿用 stage 5，保证与已有图可比。
@@ -36,6 +42,7 @@
 #
 # 用法：
 #   zsh 22.erp-contrast.sh                      # 两模态、两张图都出
+#   zsh 22.erp-contrast.sh > 22.log 2>&1        # 连日志一起留（逐帧 GFP/max|ch|）
 #   python python/erp-contrast.py --mode EEG --analysis diff \
 #       --times-start 0.08 --times-stop 0.56 --times-step 0.06
 #   python python/erp-contrast.py --mode MEG --analysis both --no-sensors

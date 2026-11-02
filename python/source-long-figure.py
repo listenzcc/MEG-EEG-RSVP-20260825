@@ -87,6 +87,7 @@ Notes:
 # Requirements and constants
 import argparse
 import logging
+import re
 from pathlib import Path
 
 import matplotlib
@@ -102,6 +103,21 @@ from matplotlib.colors import Normalize
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
 logger = logging.getLogger('source-long-figure')
+
+
+def split_tokens(values):
+    '''把 nargs='+' 收上来的东西拆成单个 token。
+
+    三种写法都得认：`-v dor cau`（nargs 已拆开）、`-v "dor cau"`（引号里带空格，
+    zsh 默认不对未加引号的变量分词，所以脚本里给变量加引号时就是这一种）、
+    `-v dor,cau`。不拆的话整串会被当成一个名字，报“不认识的视角 dor cau”。
+    '''
+    out = []
+    for val in values:
+        for tok in re.split(r'[,;/|\s]+', str(val).strip()):
+            if tok:
+                out.append(tok)
+    return out
 
 # 默认四行：投影前后的 target ERP，和投影前的 quick / slow（运动本体）
 ROWS_DEFAULT = [
@@ -150,7 +166,8 @@ parser.add_argument('-v', '--view', '--views', dest='views', nargs='+',
                     default=['dor'],
                     help='视角，可以给多个：dor（俯视，默认）、cau（后视，看枕叶视觉区）、'
                          'lat、med、ven、ros、fro、par。给两个就每个条件出两行，'
-                         '行数翻倍。也认 dorsal / posterior / back 这类全名')
+                         '行数翻倍。也认 dorsal / posterior / back 这类全名。'
+                         '写法 -v dor cau / -v "dor cau" / -v dor,cau 都认')
 parser.add_argument('--hemi', default='both', choices=['both', 'lh', 'rh'],
                     help='both 两个半球并排一格，默认；lh / rh 只画一侧')
 parser.add_argument('--cortex', default='classic',
@@ -208,7 +225,7 @@ parser.add_argument('--self-test', action='store_true',
 
 args = parser.parse_args()
 
-MODES = [m.upper() for m in args.modes]
+MODES = [m.upper() for m in split_tokens(args.modes)]
 DATA_DIR = Path(args.stc_dir)
 OUTPUT_DIR = Path(args.output_dir)
 
@@ -228,6 +245,11 @@ VIEW_NAMES = {'dor': 'dorsal', 'cau': 'posterior', 'ven': 'ventral',
               'fro': 'frontal', 'par': 'parietal'}
 
 
+def split_view_tokens(values):
+    '''把 --view 收上来的东西拆成单个视角名。'''
+    return split_tokens(values)
+
+
 def normalize_view(name):
     '''把 --view 的写法统一成 mne 认识的三字母视角名。'''
     key = str(name).lower()
@@ -238,10 +260,12 @@ def normalize_view(name):
 
 
 VIEWS = []
-for _v in args.views:
+for _v in split_view_tokens(args.views):
     _v = normalize_view(_v)
     if _v not in VIEWS:
         VIEWS.append(_v)
+if not VIEWS:
+    raise SystemExit('--view 没给视角')
 VIEW_TAGS = [VIEW_NAMES[v] for v in VIEWS]
 
 # 这两个在 main 里按参数定，函数里当全局读
@@ -325,7 +349,7 @@ def stc_stem(mode, subj, epochs_fname, tag):
 def subject_names(mode):
     '''被试名单，-s 优先，否则扫盘。'''
     if args.subjects:
-        return list(args.subjects)
+        return list(split_tokens(args.subjects))
     return sorted(p.name.split('-')[-1]
                   for p in DATA_DIR.glob(f'{mode}-*') if p.is_dir())
 
@@ -830,11 +854,12 @@ def main():
     '''
     global SUBJECTS_DIR
 
-    rows_spec = [parse_row(s) for s in args.rows]
-    if args.row_labels and len(args.row_labels) != len(rows_spec):
-        raise SystemExit(f'--row-labels 有 {len(args.row_labels)} 项，'
+    rows_spec = [parse_row(s) for s in split_tokens(args.rows)]
+    row_labels = split_tokens(args.row_labels) if args.row_labels else None
+    if row_labels and len(row_labels) != len(rows_spec):
+        raise SystemExit(f'--row-labels 有 {len(row_labels)} 项，'
                          f'-r 有 {len(rows_spec)} 行，对不上')
-    labels = (list(args.row_labels) if args.row_labels
+    labels = (row_labels if row_labels
               else [default_label(e, t) for e, t in rows_spec])
 
     try:

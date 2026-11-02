@@ -4,7 +4,7 @@ Author: Chuncheng Zhang
 Date: 2026-10-30
 
 Purpose:
-    一行一个条件的源空间激活长图：从左到右 0-1 s 的一排，俯视图，受试间平均。
+    一行一个条件的源空间激活长图：从左到右 0-1 s 的一排，受试间平均。
 
     默认四行，两个模态各出一张：
 
@@ -17,6 +17,10 @@ Purpose:
     响应在快慢两组里长什么样），投影后的文件里那一块已经被投掉了。行由 -r 指定，
     不写就用上面这四行。
 
+    视角可以给多个（-v dor cau）。给两个视角时每个条件出两行，四行变八行：同一
+    条件的俯视与后视并排，后视看的是枕叶视觉区。行序是「条件为组、组内按视角」，
+    同一组共用一根色标，所以俯视与后视的深浅在组内可以直接比。
+
 Inputs:
     output/source-estimation/{MODE}-{SUBJ}/{epochs_fname}.{tag}-lh.stc / -rh.stc
     这些文件由 python/source-estimation.py（stage 8 / 15 / 16）写出，本脚本只读。
@@ -24,7 +28,7 @@ Inputs:
 
 Outputs:
     output/source-long-figure/source-long-{MODE}.png           长图
-    output/source-long-figure/source-long-summary.csv          每行的 vmax / 被试 / 时刻
+    output/source-long-figure/source-long-summary.csv          每行（含视角）的 vmax / 被试 / 时刻
     output/source-long-figure/source-long-{MODE}-panels/*.png  逐格原图（--save-panels）
 
 画什么量:
@@ -33,9 +37,10 @@ Outputs:
     --measure signed，配色自动换成 RdBu_r。
 
 色标（这是留给你调的接口）:
-    四行各自定色标（--clim-mode row，默认）。这四行的幅度本来就不在一个量级上——
-    投影后只有投影前的两三成——共用一根色标会把投影后那一行压成一片黑，所以不统一。
-    每行的 vmax 写在行标签上，行与行的量级关系由那里读，形状由各行的色标读。
+    每个条件各自定色标（--clim-mode row，默认）。这几行的幅度本来就不在一个量级上——
+    投影后只有投影前的两三成——共用一根色标会把投影后那一行压成一片黑，所以不统一；
+    同一条件的多个视角共用一根（vmax 按条件定，跨视角不变）。
+    每行的 vmax 写在组标签上，组与组的量级关系由那里读，形状由各组的色标读。
     确实想让深浅直接比幅度时再换 --clim-mode shared。
 
     单侧色标下 mne 对 0~vmax/2 做透明度斜坡（0 全透明），皮层灰底会透出来，
@@ -51,10 +56,10 @@ Outputs:
       --unit U          色标标题里的单位文字
 
 Usage:
-    python python/source-long-figure.py --dry-run
-    python python/source-long-figure.py -m MEG
+    python python/source-long-figure.py --dry-run -v dor cau
+    python python/source-long-figure.py -m MEG -v dor cau
     python python/source-long-figure.py -m MEG --clim 1e-13 --colorbar row
-    python python/source-long-figure.py --self-test
+    python python/source-long-figure.py --self-test -v dor cau
     python python/source-long-figure.py -m EEG --colormap inferno --clim-percent 98
     python python/source-long-figure.py -m MEG --measure signed --colormap RdBu_r
     python python/source-long-figure.py -r epochs-1-notch-epo.fif:ave \
@@ -70,10 +75,11 @@ Notes:
       第 2 行改用 tag ave-sharedcov（23.source-long-figure.sh 的文件头有循环写法）。
     - 渲染走 stc.plot，需要 3D 后端（pyvista）；无显示器的机器用 xvfb-run -a。
     - 图内文字用英文，避免服务器缺中文字体。
-    - 俯视图是 --view dor（dorsal），hemi=both 时一格里面左右半球并排。
-      正/侧/腹面改 --view fro lat med ven。
+    - 俯视是 -v dor（默认），后视看枕叶用 -v cau（posterior / back 也认），
+      正/侧/腹面用 fro lat med ven。hemi=both 时一格里面左右半球并排。
     - 时间网格 0-1 s 步长 0.1 s 共 11 帧，用 --start / --stop / --step 或 --times 改。
-    - 两个模态 × 四行 × 11 帧 = 88 次渲染，按每格两三秒估，整段十几分钟。
+    - 两个模态 × 四行 × 两个视角 × 11 帧 = 176 次渲染，按每格两三秒估，整段半小时
+      上下；只跑一个视角就减半。--render-mode reuse 能再快一些。
 """
 
 
@@ -140,8 +146,11 @@ parser.add_argument('--unit', default='',
                     help='色标标题里的单位文字，例如 fA / nAm')
 
 # 渲染
-parser.add_argument('--view', default='dor',
-                    help='视角，默认 dor（俯视）；lat med ven fro par 亦可')
+parser.add_argument('-v', '--view', '--views', dest='views', nargs='+',
+                    default=['dor'],
+                    help='视角，可以给多个：dor（俯视，默认）、cau（后视，看枕叶视觉区）、'
+                         'lat、med、ven、ros、fro、par。给两个就每个条件出两行，'
+                         '行数翻倍。也认 dorsal / posterior / back 这类全名')
 parser.add_argument('--hemi', default='both', choices=['both', 'lh', 'rh'],
                     help='both 两个半球并排一格，默认；lh / rh 只画一侧')
 parser.add_argument('--cortex', default='classic',
@@ -202,6 +211,38 @@ args = parser.parse_args()
 MODES = [m.upper() for m in args.modes]
 DATA_DIR = Path(args.stc_dir)
 OUTPUT_DIR = Path(args.output_dir)
+
+# 视角：用户写全名也认，内部一律换成 mne 的三字母写法
+VIEW_ALIASES = {
+    'dor': 'dor', 'dorsal': 'dor', 'top': 'dor', 'axi': 'dor', 'axial': 'dor',
+    'cau': 'cau', 'caudal': 'cau', 'posterior': 'cau', 'back': 'cau',
+    'ven': 'ven', 'ventral': 'ven', 'bottom': 'ven',
+    'lat': 'lat', 'lateral': 'lat',
+    'med': 'med', 'medial': 'med',
+    'ros': 'ros', 'rostral': 'ros',
+    'fro': 'fro', 'frontal': 'fro', 'front': 'fro',
+    'par': 'par', 'parietal': 'par',
+}
+VIEW_NAMES = {'dor': 'dorsal', 'cau': 'posterior', 'ven': 'ventral',
+              'lat': 'lateral', 'med': 'medial', 'ros': 'rostral',
+              'fro': 'frontal', 'par': 'parietal'}
+
+
+def normalize_view(name):
+    '''把 --view 的写法统一成 mne 认识的三字母视角名。'''
+    key = str(name).lower()
+    if key not in VIEW_ALIASES:
+        raise SystemExit(f'不认识的视角 {name}，可选：'
+                         + '、'.join(sorted(VIEW_ALIASES)))
+    return VIEW_ALIASES[key]
+
+
+VIEWS = []
+for _v in args.views:
+    _v = normalize_view(_v)
+    if _v not in VIEWS:
+        VIEWS.append(_v)
+VIEW_TAGS = [VIEW_NAMES[v] for v in VIEWS]
 
 # 这两个在 main 里按参数定，函数里当全局读
 CMAP = args.colormap or ('magma' if args.measure == 'abs' else 'RdBu_r')
@@ -515,7 +556,7 @@ def row_note(n_subjects, vmax, ratio=None, is_first=False):
 
 
 def assemble(mode, panels, times, labels, notes, bars, cmap, fname,
-             subtitle=None):
+             subtitle=None, tags=None, groups=None):
     '''
     把逐格截图拼成一张长图。
 
@@ -526,12 +567,16 @@ def assemble(mode, panels, times, labels, notes, bars, cmap, fname,
         mode: MEG / EEG，进标题
         panels: panels[row][col]，每项是 HxWx3 的 ndarray
         times: 每列的时刻（s）
-        labels: 每行的大字标签
-        notes: 每行的小字（N 与 vmax）
-        bars: 每行一个 dict(vmax, symmetric)，画色标用
+        labels: 每行的大字标签（groups 给了就不用）
+        notes: 每行的小字（N 与 max）（groups 给了就不用）
+        bars: 每行一个 dict(vmax, symmetric, span, show)，画色标用；
+            span 是这根色标覆盖几行（同一条件的多个视角共用一根）
         cmap: 与 stc.plot 用同一个 colormap
         fname: 输出文件名
         subtitle: 第二行小字，默认由参数拼
+        tags: 每行的视角名（多视角时才有，单视角传 None 就不占位）
+        groups: 多视角时每组的 dict(start, span, label, note)。标签与量级只写在
+            组的中线上一份，视角名写在各自行上——八行各写一遍 label 会挤成一团
     '''
     n_rows, n_cols = len(panels), len(panels[0])
     h, w = panels[0][0].shape[:2]
@@ -539,15 +584,25 @@ def assemble(mode, panels, times, labels, notes, bars, cmap, fname,
     # 字号跟着单格宽度缩放：11 列的长图缩到一页宽之后，9 pt 会小到看不见
     f = args.font_scale
     fs_time, fs_row, fs_note = 11 * f, 11 * f, 9 * f
+    fs_tag = 9.5 * f
     fs_title, fs_sub, fs_bar = 14 * f, 10 * f, 8 * f
+    tags = list(tags) if tags else [''] * n_rows
+    if groups:
+        left_texts = [(g['label'], fs_row) for g in groups] \
+            + [(g['note'], fs_note) for g in groups]
+    else:
+        left_texts = list(zip(labels, [fs_row] * len(labels))) \
+            + list(zip(notes, [fs_note] * len(notes)))
 
     col_w = 2.0                     # 一列脑图的宽度（英寸）
     row_h = col_w * h / w
     # 左边留白按最长的那行标签实测宽度算，留 0.30 英寸的边距
-    left = max([1.25] +
-               [text_width_in(v, fs) + 0.30
-                for v, fs in list(zip(labels, [fs_row] * len(labels)))
-                + list(zip(notes, [fs_note] * len(notes)))])
+    widest_label = max([text_width_in(v, fs) for v, fs in left_texts] or [0.])
+    # 多视角时左边排成两列：条件标签一列、视角名一列。两列的宽度都要先量出来，
+    # 否则标签的第一行会伸进视角名那一栏里（自检里「dorsal」压着「target ERP」）
+    tag_w = max([text_width_in(t, fs_tag) for t in tags if t] or [0.])
+    tag_w = tag_w + 0.02 if tag_w else 0.
+    left = max(1.25, 0.30 + widest_label + (tag_w + 0.14 if tag_w else 0.))
     top, bottom = 0.80, 0.06
     bar_w = 0.10
     cbar_mode = args.colorbar
@@ -558,8 +613,9 @@ def assemble(mode, panels, times, labels, notes, bars, cmap, fname,
     if nbar:
         # 右边留白按最长的刻度文字实测：MEG 的刻度是 9.6e-15 这种七个字符，
         # 写死 0.6 英寸会被右边界切掉最后一位
-        texts = [f'{b["vmax"]:.2g}' for b in bars] \
-            + [f'{b["vmax"] / 2:.2g}' for b in bars] + ['0', args.unit]
+        vals = [b['vmax'] for b in bars if b.get('vmax')] or [0.]
+        texts = [f'{v:.2g}' for v in vals] + [f'{v / 2:.2g}' for v in vals] \
+            + ['0', args.unit]
         widest = max(text_width_in(t, fs_bar) for t in texts)
         right = 0.12 + bar_w + 0.08 + widest + 0.26
 
@@ -568,8 +624,12 @@ def assemble(mode, panels, times, labels, notes, bars, cmap, fname,
     fig = plt.figure(figsize=(W, H))
     fig.patch.set_facecolor('white')
 
+    def row_y(r):
+        '''第 r 行的下边界（图坐标，0 在下）。'''
+        return (H - top - (r + 1) * row_h) / H
+
     for r in range(n_rows):
-        y = (H - top - (r + 1) * row_h) / H
+        y = row_y(r)
         for c in range(n_cols):
             x = (left + c * col_w) / W
             ax = fig.add_axes([x, y, col_w / W, row_h / H])
@@ -581,17 +641,38 @@ def assemble(mode, panels, times, labels, notes, bars, cmap, fname,
                          fontsize=fs_time)
 
         yc = (H - top - (r + 0.5) * row_h) / H
-        fig.text((left - 0.18) / W, yc + 0.11 * row_h / H, labels[r],
-                 ha='right', va='center', fontsize=fs_row, linespacing=1.45)
-        fig.text((left - 0.18) / W, yc - 0.17 * row_h / H, notes[r],
-                 ha='right', va='center', fontsize=fs_note, color='0.35')
+        if groups:
+            # 多视角：视角名单独一列，紧贴脑图；条件标签在它左边一列
+            if tags[r]:
+                fig.text((left - 0.06) / W, yc, tags[r], ha='right',
+                         va='center', fontsize=fs_tag, color='0.10')
+        else:
+            x_label = (left - 0.18) / W
+            fig.text(x_label, yc + 0.11 * row_h / H, labels[r],
+                     ha='right', va='center', fontsize=fs_row, linespacing=1.45)
+            fig.text(x_label, yc - 0.17 * row_h / H, notes[r],
+                     ha='right', va='center', fontsize=fs_note, color='0.35')
 
-        if cbar_mode == 'row' and bars[r]['vmax']:
+        if cbar_mode == 'row' and bars[r].get('vmax') and bars[r].get('show', True):
+            # 同一条件的几个视角共用一根色标：bar 落在第一行上，span 覆盖它们
+            span = int(bars[r].get('span', 1))
+            base = row_y(r + span - 1)
             cax = fig.add_axes([(left + n_cols * col_w + 0.12) / W,
-                                y + row_h / H * 0.16,
-                                bar_w / W, row_h / H * 0.68])
+                                base + span * row_h / H * 0.12,
+                                bar_w / W, span * row_h / H * 0.76])
             draw_bar(fig, cax, bars[r]['vmax'], bars[r]['symmetric'],
                      cmap, fs_bar, args.unit)
+
+    if groups:
+        # 条件标签与量级写在组的中线上，右对齐到「视角名那一列的左边」
+        x_label = (left - 0.06 - tag_w - 0.14) / W
+        for g in groups:
+            ymid = (H - top - (g['start'] + g['span'] / 2.) * row_h) / H
+            fig.text(x_label, ymid + 0.05 / H, g['label'], ha='right',
+                     va='bottom', fontsize=fs_row, linespacing=1.35)
+            if g['note']:
+                fig.text(x_label, ymid - 0.05 / H, g['note'], ha='right',
+                         va='top', fontsize=fs_note, color='0.35')
 
     if cbar_mode == 'shared' and bars[0]['vmax']:
         cax = fig.add_axes([(left + n_cols * col_w + 0.12) / W,
@@ -602,8 +683,9 @@ def assemble(mode, panels, times, labels, notes, bars, cmap, fname,
 
     title = args.title or f'{mode} group mean source estimate'
     fig.text(0.5, (H - 0.10) / H, title, ha='center', va='top', fontsize=fs_title)
+    view_txt = ' + '.join(VIEW_TAGS)
     fig.text(0.5, (H - 0.34) / H,
-             subtitle or (f'{args.measure} | view {args.view} | {n_rows} rows x '
+             subtitle or (f'{args.measure} | view {view_txt} | {n_rows} rows x '
                           f'{n_cols} frames | colour scale: {args.clim_mode}'),
              ha='center', va='top', fontsize=fs_sub, color='0.35')
 
@@ -625,7 +707,7 @@ def check_backend():
     return backend
 
 
-def make_brain(stc, clim, t0):
+def make_brain(stc, clim, t0, view):
     '''
     建一个脑图窗口用来截屏。
 
@@ -633,7 +715,7 @@ def make_brain(stc, clim, t0):
     在拼图里画，这样整张长图的色标样式一致，也方便调。
     '''
     return stc.plot(subject='fsaverage', subjects_dir=SUBJECTS_DIR,
-                    hemi=args.hemi, views=[args.view], initial_time=float(t0),
+                    hemi=args.hemi, views=[view], initial_time=float(t0),
                     time_viewer=False, clim=clim, colormap=CMAP,
                     colorbar=False, size=tuple(args.panel_size),
                     background='white', foreground='black',
@@ -643,7 +725,7 @@ def make_brain(stc, clim, t0):
                     brain_kwargs=dict(show=False))
 
 
-def render_row(stc, clim, times, render_mode):
+def render_row(stc, clim, times, render_mode, view):
     '''
     渲染一行的所有帧。
 
@@ -654,13 +736,13 @@ def render_row(stc, clim, times, render_mode):
     if render_mode == 'rebuild':
         images = []
         for t in times:
-            brain = make_brain(stc, clim, t)
+            brain = make_brain(stc, clim, t, view)
             images.append(np.asarray(brain.screenshot(mode='rgb')))
             brain.close()
         return images
 
     images = []
-    brain = make_brain(stc, clim, times[0])
+    brain = make_brain(stc, clim, times[0], view)
     try:
         for t in times:
             brain.set_time(float(t))
@@ -673,7 +755,7 @@ def render_row(stc, clim, times, render_mode):
     if same:
         logger.warning(f'reuse 下有 {same}/{len(images) - 1} 对相邻帧完全相同，'
                        '重绘链没生效，这一行改用 rebuild 重截')
-        return render_row(stc, clim, times, 'rebuild')
+        return render_row(stc, clim, times, 'rebuild', view)
     return images
 
 
@@ -692,35 +774,48 @@ def run_self_test():
 
     panels = []
     rr, cc = np.ogrid[:110, :240]
-    for r, v in enumerate(vmaxes):
-        row = []
-        for c, _ in enumerate(times):
-            img = np.full((110, 240, 3), 255, np.uint8)
-            for k, (yy, xx) in enumerate([(40, 70), (58, 150), (78, 200)]):
-                amp = v * (1 + 0.5 * np.sin(c / 2. + k))
-                mask = (rr - yy) ** 2 + (cc - xx) ** 2 < 19 ** 2
-                shade = int(255 - 200 * min(amp, 1.0))
-                img[mask] = (shade, shade, 255 - (255 - shade) // 3)
-            row.append(img)
-        panels.append(row)
+    for v in vmaxes:
+        for _view in VIEWS:          # 条件 × 视角，和主流程排法一致
+            row = []
+            for c, _ in enumerate(times):
+                img = np.full((110, 240, 3), 255, np.uint8)
+                for k, (yy, xx) in enumerate([(40, 70), (58, 150), (78, 200)]):
+                    amp = v * (1 + 0.5 * np.sin(c / 2. + k))
+                    mask = (rr - yy) ** 2 + (cc - xx) ** 2 < 19 ** 2
+                    shade = int(255 - 200 * min(amp, 1.0))
+                    img[mask] = (shade, shade, 255 - (255 - shade) // 3)
+                row.append(img)
+            panels.append(row)
 
     if args.colorbar == 'auto':
         args.colorbar = 'row' if args.clim_mode == 'row' else 'shared'
-    notes = [row_note(10, v, v / vmaxes[0], is_first=(i == 0))
-             for i, v in enumerate(vmaxes)]
     sym = args.colorbar_symmetric or args.measure != 'abs'
-    rows_seen = [dict(vmax=v, symmetric=sym) for v in
-                 (vmaxes if args.clim_mode == 'row'
-                  else [vmaxes[0]] * len(vmaxes))]
+    multi = len(VIEWS) > 1
+
+    labels_out, notes_out, tags_out, bars_out = [], [], [], []
+    groups = []
+    for i, v in enumerate(vmaxes):
+        vbar = v if args.clim_mode == 'row' else vmaxes[0]
+        note = row_note(10, v, v / vmaxes[0], is_first=(i == 0))
+        for j, view in enumerate(VIEWS):
+            labels_out.append(labels[i])
+            notes_out.append(note)
+            tags_out.append(VIEW_NAMES[view] if multi else '')
+            bars_out.append(dict(vmax=vbar, symmetric=sym, span=len(VIEWS),
+                                 show=(j == 0)))
+        groups.append(dict(start=i * len(VIEWS), span=len(VIEWS),
+                           label=labels[i], note=note))
 
     flat = [im for row in panels for im in row]
     cropped = apply_crop(flat, [crop_box(im) for im in flat])
     n = len(times)
-    panels = [cropped[r * n:(r + 1) * n] for r in range(len(vmaxes))]
+    n_rows = len(vmaxes) * len(VIEWS)
+    panels = [cropped[r * n:(r + 1) * n] for r in range(n_rows)]
 
-    assemble('SELF', panels, times, labels, notes, rows_seen,
+    assemble('SELF', panels, times, labels_out, notes_out, bars_out,
              plt.get_cmap(CMAP), OUTPUT_DIR / 'source-long-SELF-TEST.png',
-             subtitle='self test, synthetic panels')
+             subtitle='self test, synthetic panels', tags=tags_out,
+             groups=groups if multi else None)
     print(f'time grid: {times}')
     print(f'clim (signed) {clim_dict(1.0, -0.5)}   (one sided) {clim_dict(1.0, 0.0)}')
     print(f'colormap: {CMAP}, colorbar: {args.colorbar}, mode: {args.clim_mode}')
@@ -799,8 +894,15 @@ def main():
                         f'{ratio:.2f}x row1, 数据范围 '
                         f'[{p["data_min"]:.4g}, {p["data_max"]:.4g}]')
 
-        panels = []
-        for i, p in enumerate(prepared):
+        # 一行 = 一个条件的一个视角。同一条件的几个视角连着排，共用一根色标
+        # （vmax 是按条件定的，跨视角不变，所以两个视角的深浅可以直接比）。
+        plan = [(i, view) for i in range(len(prepared)) for view in VIEWS]
+        multi = len(VIEWS) > 1
+
+        panels, labels_out, notes_out, tags_out, bars_out = [], [], [], [], []
+        groups = []
+        for k, (i, view) in enumerate(plan):
+            p = prepared[i]
             if p['data'].shape != template.data.shape:
                 raise SystemExit(
                     f'{mode} row {i + 1} 的数据是 {p["data"].shape}，'
@@ -809,7 +911,21 @@ def main():
             stc.data = p['data']
             stc.subject = 'fsaverage'
             clim = clim_dict(p['vmax_used'], p['data_min'])
-            logger.info(f'{mode} row {i + 1} clim = {clim}')
+
+            note = row_note(len(p['subjects']), p['vmax_used'], p['ratio'],
+                            is_first=(i == 0))
+            labels_out.append(labels[i])
+            notes_out.append(note)
+            tags_out.append(VIEW_NAMES[view] if multi else '')
+            bars_out.append(dict(vmax=p['vmax_used'], symmetric=p['symmetric'],
+                                 span=len(VIEWS), show=(view == VIEWS[0])))
+            if view == VIEWS[0]:
+                groups.append(dict(start=k, span=len(VIEWS),
+                                   label=labels[i], note=note))
+
+            logger.info(f'{mode} row {k + 1} '
+                        f'{labels[i].replace(chr(10), "/")} · {VIEW_NAMES[view]}'
+                        f' clim = {clim}')
 
             if args.dry_run:
                 # 浅灰占位格，只验版式：行标签、时刻、色标位置都能先看一眼，
@@ -821,20 +937,22 @@ def main():
                 panels.append([blank.copy() for _ in times])
                 continue
 
-            imgs = render_row(stc, clim, times, args.render_mode)
+            imgs = render_row(stc, clim, times, args.render_mode, view)
             panels.append(imgs)
             if args.save_panels:
                 folder = OUTPUT_DIR / f'source-long-{mode}-panels'
                 folder.mkdir(parents=True, exist_ok=True)
                 for im, t in zip(imgs, times):
-                    plt.imsave(folder / f'row{i + 1}-{t:.3f}s.png', im)
+                    plt.imsave(folder / f'row{k + 1}-{VIEW_NAMES[view]}-'
+                                        f'{t:.3f}s.png', im)
 
             summary.append(dict(
-                mode=mode, row=i + 1, epochs_fname=p['row']['epochs'],
+                mode=mode, row=k + 1, epochs_fname=p['row']['epochs'],
                 tag=p['row']['tag'], label=labels[i].replace('\n', ' '),
+                view=VIEW_NAMES[view],
                 n_subjects=len(p['subjects']),
                 subjects=' '.join(p['subjects']),
-                measure=args.measure, view=args.view, hemi=args.hemi,
+                measure=args.measure, hemi=args.hemi,
                 times=' '.join(f'{t:.3f}' for t in times),
                 vmax=f'{p["vmax_used"]:.6g}',
                 vmax_vs_row1=f'{p["ratio"]:.4f}'
@@ -847,17 +965,13 @@ def main():
         flat = [im for row in panels for im in row]
         cropped = apply_crop(flat, [crop_box(im) for im in flat])
         n = len(times)
-        panels = [cropped[r * n:(r + 1) * n] for r in range(len(prepared))]
+        panels = [cropped[r * n:(r + 1) * n] for r in range(len(plan))]
 
-        notes = [row_note(len(p['subjects']), p['vmax_used'], p['ratio'],
-                          is_first=(i == 0))
-                 for i, p in enumerate(prepared)]
         suffix = '-DRYRUN' if args.dry_run else ''
-        bars = [dict(vmax=p['vmax_used'], symmetric=p['symmetric'])
-                for p in prepared]
-        assemble(mode, panels, times, labels, notes, bars,
+        assemble(mode, panels, times, labels_out, notes_out, bars_out,
                  plt.get_cmap(CMAP),
-                 OUTPUT_DIR / f'source-long-{mode}{suffix}.png')
+                 OUTPUT_DIR / f'source-long-{mode}{suffix}.png',
+                 tags=tags_out, groups=groups if multi else None)
         if args.dry_run:
             logger.info(f'{mode} dry-run 到此为止：没有渲染，上面这张是空格的版式图')
 

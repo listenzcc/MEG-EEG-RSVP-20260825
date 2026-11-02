@@ -1,8 +1,12 @@
 #!/usr/bin/env zsh
 
-# 文章用的源空间长图：一行一个条件，从左到右 0-1 s，俯视图，受试间平均。
+# 文章用的源空间长图：一行一个条件的一个视角，从左到右 0-1 s，受试间平均。
 #
-# 四行（默认）：
+# 两个视角：俯视 dor（默认看运动/中央区）+ 后视 cau（看枕叶视觉区）。每个条件出两行，
+# 四行变八行。行序是「条件为组、组内按视角」，同一组共用一根色标，所以俯视与后视的
+# 深浅在组内可以直接比。只想要四行就把 views 改成 "dor"。
+#
+# 四行（默认条件）：
 #   before proj      epochs-1-notch-epo.fif                    ave
 #   after proj       epochs-1-notch-removal-artificial-epo.fif  ave
 #   quick (movement) epochs-1-notch-epo.fif                    ave-quick-sharedcov
@@ -45,7 +49,8 @@
 # RdBu_r）。配色不喜欢就给 --colormap：viridis inferno cividis turbo hot mne。
 
 # ── 色标怎么调 ────────────────────────────────────────────────────────────
-# 默认 --clim-mode row：四行各自定 vmax、各自一根色标。这四行幅度不在一个量级上
+# 默认 --clim-mode row：每个条件各自定 vmax、各自一根色标（多个视角共用这一根）。
+# 这几行幅度不在一个量级上
 # （投影后只有投影前的两三成），统一色标会把投影后那行压成一片黑，所以不统一；
 # 每行的 vmax 写在行标签上，量级关系从那里读。想让深浅直接比幅度再换 shared。
 # 数值太小不好读时乘个量级：
@@ -58,7 +63,8 @@
 #
 # ── 其它常用开关 ──────────────────────────────────────────────────────────
 #   --times 0.2 0.3 0.4 0.5          只出这几帧（默认 0-1 s 步长 0.1，共 11 帧）
-#   --view dor | lat | med | ven     俯视图是 dor（默认）
+#   --view dor cau                   视角，可给多个；dor 俯视（默认）、cau 后视、
+#                                    lat 侧面、med 内侧、ven 腹面、fro 正面
 #   --hemi lh | rh                   只看一侧
 #   --measure signed                 看正负极性（默认 abs，只看幅度、magma 配色）
 #   --colormap inferno               换配色（magma viridis inferno cividis turbo hot）
@@ -82,16 +88,19 @@ python --version
 
 script=./python/source-long-figure.py
 
+# 视角：俯视 + 后视。后视看枕叶视觉区，两个视角让每个条件占两行
+views="dor cau"
+
 # 1. 先看版式与 vmax（本机也能跑，不需要 3D 后端）
-python $script --dry-run
+python $script --dry-run -v $views
 echo "---- dry-run 完了，看 output/source-long-figure/source-long-*-DRYRUN.png ----"
 
 # 2. 正式出图（默认 abs + magma + 每行一根色标）。--data-scale 与 --unit 按 dry-run
 #    日志里的数据范围定，这里留给你改：MNE 逆解是 Am 量级，乘 1e15 得到 fA 量级。
-python $script --data-scale 1e15 --unit fA --clim-percent 99
+python $script -v $views --data-scale 1e15 --unit fA --clim-percent 99
 
 # 3. 四行共用一根色标的版本（要直接比幅度时才跑，多一倍渲染时间，默认关掉）
-# python $script --clim-mode shared --data-scale 1e15 --unit fA \
+# python $script -v $views --clim-mode shared --data-scale 1e15 --unit fA \
 #     -o output/source-long-figure/shared
 
 # 无显示器时整段前面加 xvfb-run -a：

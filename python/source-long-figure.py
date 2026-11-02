@@ -27,16 +27,26 @@ Outputs:
     output/source-long-figure/source-long-summary.csv          每行的 vmax / 被试 / 时刻
     output/source-long-figure/source-long-{MODE}-panels/*.png  逐格原图（--save-panels）
 
+画什么量:
+    默认 --measure abs：逐被试取绝对值再平均，读的是激活幅度，不看方向。色标因此
+    是单侧的 0~vmax，配色走 magma（暗→亮）。要看正负极性（蓝负红正）就换
+    --measure signed，配色自动换成 RdBu_r。
+
 色标（这是留给你调的接口）:
-    投影后的幅度只有投影前的两三成，共用色标会把投影后那一行压成一片白。所以默认
-    --clim-mode row：每行按自己显示的那些帧定 vmax，削减量改由行标题上的 vmax 与
-    「相对第一行的比值」给出，形状与量级都不丢。要目测幅度就换 --clim-mode shared。
+    四行各自定色标（--clim-mode row，默认）。这四行的幅度本来就不在一个量级上——
+    投影后只有投影前的两三成——共用一根色标会把投影后那一行压成一片黑，所以不统一。
+    每行的 vmax 写在行标签上，行与行的量级关系由那里读，形状由各行的色标读。
+    确实想让深浅直接比幅度时再换 --clim-mode shared。
+
+    单侧色标下 mne 对 0~vmax/2 做透明度斜坡（0 全透明），皮层灰底会透出来，
+    所以低激活处不会糊成一片黑。
 
       --clim X          直接指定 vmax（与数据同单位，MNE 逆解是 Am 量级）
       --clim-percent P  vmax 取 |值| 的哪个分位数（默认 99）
-      --clim-mode       row | shared
-      --colormap        默认 RdBu_r（有符号，蓝负红正）；--measure abs 时默认 hot
-      --colorbar        auto | row | shared | none
+      --clim-mode       row | shared（默认 row）
+      --colormap        默认 magma（abs）/ RdBu_r（signed）；
+                        备选 viridis inferno cividis turbo hot mne
+      --colorbar        auto | row | shared | none（默认 auto：每行一根）
       --data-scale S    画之前把数据乘 S，色标刻度跟着变（例如 1e15 得到 fA 量级）
       --unit U          色标标题里的单位文字
 
@@ -45,7 +55,8 @@ Usage:
     python python/source-long-figure.py -m MEG
     python python/source-long-figure.py -m MEG --clim 1e-13 --colorbar row
     python python/source-long-figure.py --self-test
-    python python/source-long-figure.py -m EEG --clim-mode shared --clim-percent 98
+    python python/source-long-figure.py -m EEG --colormap inferno --clim-percent 98
+    python python/source-long-figure.py -m MEG --measure signed --colormap RdBu_r
     python python/source-long-figure.py -r epochs-1-notch-epo.fif:ave \
         epochs-1-notch-removal-artificial-epo.fif:ave --row-labels before after
 
@@ -82,8 +93,6 @@ import numpy as np
 import pandas as pd
 from matplotlib.cm import ScalarMappable
 from matplotlib.colors import Normalize
-from matplotlib.font_manager import FontProperties
-from matplotlib.textpath import TextPath
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
 logger = logging.getLogger('source-long-figure')
@@ -122,9 +131,9 @@ parser.add_argument('--times', type=float, nargs='*', default=None,
                     help='直接给时刻列表，给了就不看 --start/--stop/--step')
 
 # 画成什么量
-parser.add_argument('--measure', default='signed', choices=['signed', 'abs'],
-                    help='signed：逐被试带符号的群体均值（默认）；'
-                         'abs：逐被试取绝对值再平均，读的是激活幅度')
+parser.add_argument('--measure', default='abs', choices=['signed', 'abs'],
+                    help='abs：逐被试取绝对值再平均，读激活幅度（默认，方向不看）；'
+                         'signed：逐被试带符号的群体均值，看正负极性')
 parser.add_argument('--data-scale', type=float, default=1.0,
                     help='画之前把数据乘这个数，只影响色标刻度与数字')
 parser.add_argument('--unit', default='',
@@ -162,12 +171,16 @@ parser.add_argument('--clim-mode', default='row', choices=['row', 'shared'],
                     help='row：每行各自定 vmax（默认，投影后那行才看得见形状）；'
                          'shared：一个模态的所有行共用一个 vmax，深浅可直接比幅度')
 parser.add_argument('--colormap', default=None,
-                    help='默认 signed 用 RdBu_r、abs 用 hot')
+                    help='默认 abs 用 magma、signed 用 RdBu_r；'
+                         '备选 viridis inferno cividis turbo hot mne')
 parser.add_argument('--colorbar', default='auto',
                     choices=['auto', 'row', 'shared', 'none'],
                     help='auto：row 模式每行一根、shared 模式一根；也可强制')
 parser.add_argument('--colorbar-symmetric', action='store_true',
                     help='强制色标以零为中心（全正的数据也想要双侧刻度时用）')
+parser.add_argument('--no-ratio', action='store_true',
+                    help='行标签上不写「相对第一行的倍数」（四行各自定色标时，'
+                         '这行小字只作量级参考，嫌啰嗦就关掉）')
 
 # 其它
 parser.add_argument('-t', '--title', default=None,
@@ -191,7 +204,7 @@ DATA_DIR = Path(args.stc_dir)
 OUTPUT_DIR = Path(args.output_dir)
 
 # 这两个在 main 里按参数定，函数里当全局读
-CMAP = args.colormap or ('hot' if args.measure == 'abs' else 'RdBu_r')
+CMAP = args.colormap or ('magma' if args.measure == 'abs' else 'RdBu_r')
 SUBJECTS_DIR = None
 
 
@@ -435,16 +448,29 @@ def apply_crop(images, boxes, pad=2):
     return [np.ascontiguousarray(im[r0:r1 + 1, c0:c1 + 1]) for im in images]
 
 
+_MEASURE_FIG = {}
+
+
 def text_width_in(text, fontsize):
     '''
     一段文字有多宽（英寸），用来定左边的留白。
 
-    用 TextPath 量，比按字数估准：中文、·、负号这些宽度都不一样，估小了标签会被
-    左边界裁掉。多行取最宽的一行。
+    用 Agg 的渲染器实测 get_window_extent。TextPath 按字形度量估出来的宽度比实际
+    窄，偏窄就意味着一行「N=10 · max 0.3 (0.30x row1)」的左端会被图边界裁掉。
+    多行取最宽的一行。
     '''
-    wp = FontProperties(size=fontsize)
-    return max((TextPath((0, 0), line, prop=wp).get_extents().width / 72.
-                for line in str(text).split('\n')), default=0.)
+    fig = _MEASURE_FIG.get('fig')
+    if fig is None:
+        fig = plt.figure(figsize=(1, 1), dpi=200)
+        _MEASURE_FIG['fig'] = fig
+    fig.clf()
+    renderer = fig.canvas.get_renderer()
+    widest = 0.
+    for line in str(text).split('\n'):
+        t = fig.text(0.5, 0.5, line, fontsize=fontsize)
+        widest = max(widest, t.get_window_extent(renderer=renderer).width)
+    fig.clf()
+    return widest / fig.dpi
 
 
 def draw_bar(fig, cax, vmax, symmetric, cmap, fontsize, unit=''):
@@ -471,6 +497,21 @@ def draw_bar(fig, cax, vmax, symmetric, cmap, fontsize, unit=''):
     cax.tick_params(labelsize=fontsize, length=2)
     if unit:
         cax.set_title(unit, fontsize=fontsize)
+
+
+def row_note(n_subjects, vmax, ratio=None, is_first=False):
+    '''
+    行标签下面的那行小字。
+
+    四行各自定色标，深浅不能跨行读，所以量级写在这里：N 与 vmax，外加相对第一行
+    的倍数。--no-ratio 之后只留 N 与 vmax。
+    '''
+    word = 'max' if args.measure == 'abs' else 'vmax'
+    text = f'N={n_subjects} · {word} {vmax:.3g}'
+    if ratio is not None and not is_first and not args.no_ratio \
+            and np.isfinite(ratio):
+        text += f' ({ratio:.2f}x row1)'
+    return text
 
 
 def assemble(mode, panels, times, labels, notes, bars, cmap, fname,
@@ -502,9 +543,9 @@ def assemble(mode, panels, times, labels, notes, bars, cmap, fname,
 
     col_w = 2.0                     # 一列脑图的宽度（英寸）
     row_h = col_w * h / w
-    # 左边留白按最长的那行标签算，固定值短了会把标签裁掉
+    # 左边留白按最长的那行标签实测宽度算，留 0.30 英寸的边距
     left = max([1.25] +
-               [text_width_in(v, fs) + 0.20
+               [text_width_in(v, fs) + 0.30
                 for v, fs in list(zip(labels, [fs_row] * len(labels)))
                 + list(zip(notes, [fs_note] * len(notes)))])
     top, bottom = 0.80, 0.06
@@ -513,7 +554,14 @@ def assemble(mode, panels, times, labels, notes, bars, cmap, fname,
     if cbar_mode == 'auto':
         cbar_mode = 'none' if args.clim_mode == 'shared' else 'row'
     nbar = n_rows if cbar_mode == 'row' else (1 if cbar_mode == 'shared' else 0)
-    right = (bar_w + 0.62) if nbar else 0.10
+    right = 0.10
+    if nbar:
+        # 右边留白按最长的刻度文字实测：MEG 的刻度是 9.6e-15 这种七个字符，
+        # 写死 0.6 英寸会被右边界切掉最后一位
+        texts = [f'{b["vmax"]:.2g}' for b in bars] \
+            + [f'{b["vmax"] / 2:.2g}' for b in bars] + ['0', args.unit]
+        widest = max(text_width_in(t, fs_bar) for t in texts)
+        right = 0.12 + bar_w + 0.08 + widest + 0.26
 
     W = left + n_cols * col_w + right
     H = top + n_rows * row_h + bottom
@@ -656,12 +704,12 @@ def run_self_test():
             row.append(img)
         panels.append(row)
 
-    notes = [f'N=10 · vmax {v:.2f}' + ('' if i == 0 else
-                                       f' ({v / vmaxes[0]:.2f}x row1)')
-             for i, v in enumerate(vmaxes)]
     if args.colorbar == 'auto':
         args.colorbar = 'row' if args.clim_mode == 'row' else 'shared'
-    rows_seen = [dict(vmax=v, symmetric=True) for v in
+    notes = [row_note(10, v, v / vmaxes[0], is_first=(i == 0))
+             for i, v in enumerate(vmaxes)]
+    sym = args.colorbar_symmetric or args.measure != 'abs'
+    rows_seen = [dict(vmax=v, symmetric=sym) for v in
                  (vmaxes if args.clim_mode == 'row'
                   else [vmaxes[0]] * len(vmaxes))]
 
@@ -801,8 +849,8 @@ def main():
         n = len(times)
         panels = [cropped[r * n:(r + 1) * n] for r in range(len(prepared))]
 
-        notes = [f'N={len(p["subjects"])} · vmax {p["vmax_used"]:.3g}'
-                 + ('' if i == 0 else f' ({p["ratio"]:.2f}x row1)')
+        notes = [row_note(len(p['subjects']), p['vmax_used'], p['ratio'],
+                          is_first=(i == 0))
                  for i, p in enumerate(prepared)]
         suffix = '-DRYRUN' if args.dry_run else ''
         bars = [dict(vmax=p['vmax_used'], symmetric=p['symmetric'])

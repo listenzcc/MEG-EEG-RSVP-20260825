@@ -39,21 +39,30 @@
 # 顺便把每行的 vmax 与数据范围打到日志里。看完再决定 --clim / --data-scale：
 #   python python/source-long-figure.py --dry-run
 #
+# ── 画什么量 ──────────────────────────────────────────────────────────────
+# 默认 --measure abs：逐被试取绝对值再平均，读激活幅度，不看方向。色标是单侧的
+# 0~vmax，配色 magma（暗→亮）。想看正负极性就换 --measure signed（配色自动变
+# RdBu_r）。配色不喜欢就给 --colormap：viridis inferno cividis turbo hot mne。
+
 # ── 色标怎么调 ────────────────────────────────────────────────────────────
-# 默认 --clim-mode row：每行按自己显示的 11 帧定 vmax，投影后那一行才看得见形状；
-# 削减量由行标签上的「(0.30x row1)」给出。要目测幅度换 --clim-mode shared。
+# 默认 --clim-mode row：四行各自定 vmax、各自一根色标。这四行幅度不在一个量级上
+# （投影后只有投影前的两三成），统一色标会把投影后那行压成一片黑，所以不统一；
+# 每行的 vmax 写在行标签上，量级关系从那里读。想让深浅直接比幅度再换 shared。
 # 数值太小不好读时乘个量级：
 #   python python/source-long-figure.py -m MEG --data-scale 1e15 --unit fA
 # 觉得色标被个别顶点顶得太高（大片偏淡）就压低分位数：
 #   python python/source-long-figure.py --clim-percent 95
 # 想固定色标（跨模态、跨版本同图对比）就直接给数：
 #   python python/source-long-figure.py -m MEG --clim 1.5e-13
+# 嫌行标签上的「(0.30x row1)」啰嗦就 --no-ratio
 #
 # ── 其它常用开关 ──────────────────────────────────────────────────────────
 #   --times 0.2 0.3 0.4 0.5          只出这几帧（默认 0-1 s 步长 0.1，共 11 帧）
 #   --view dor | lat | med | ven     俯视图是 dor（默认）
 #   --hemi lh | rh                   只看一侧
-#   --measure abs                    看激活幅度（逐被试取绝对值再平均）
+#   --measure signed                 看正负极性（默认 abs，只看幅度、magma 配色）
+#   --colormap inferno               换配色（magma viridis inferno cividis turbo hot）
+#   --no-ratio                       行标签不写相对第一行的倍数
 #   --render-mode reuse              每行只建一次脑图，快；发现截图不变会自动回退
 #   --save-panels                    逐格 png 也留下来，方便单独放大
 #   --font-scale 1.3                 图里字太小就调大
@@ -77,13 +86,13 @@ script=./python/source-long-figure.py
 python $script --dry-run
 echo "---- dry-run 完了，看 output/source-long-figure/source-long-*-DRYRUN.png ----"
 
-# 2. 正式出图。--data-scale 与 --unit 按 dry-run 日志里的数据范围定，这里留给
-#    你改：MNE 逆解是 Am 量级，乘 1e15 得到 fA 量级的刻度。
+# 2. 正式出图（默认 abs + magma + 每行一根色标）。--data-scale 与 --unit 按 dry-run
+#    日志里的数据范围定，这里留给你改：MNE 逆解是 Am 量级，乘 1e15 得到 fA 量级。
 python $script --data-scale 1e15 --unit fA --clim-percent 99
 
-# 3. 想按幅度读（共用色标）时补一张，文件名不一样，不会覆盖上面的
-python $script --clim-mode shared --data-scale 1e15 --unit fA \
-    -o output/source-long-figure/shared
+# 3. 四行共用一根色标的版本（要直接比幅度时才跑，多一倍渲染时间，默认关掉）
+# python $script --clim-mode shared --data-scale 1e15 --unit fA \
+#     -o output/source-long-figure/shared
 
 # 无显示器时整段前面加 xvfb-run -a：
 #   xvfb-run -a ./23.source-long-figure.sh

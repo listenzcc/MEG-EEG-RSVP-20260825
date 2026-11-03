@@ -1,7 +1,8 @@
 #!/usr/bin/env zsh
 
-# quick 与 slow 两组目标试次的源空间**差值**长图：一组差值占两行（俯视 + 后视），
-# 从左到右 0-1 s，受试间平均。
+# quick 与 slow 两组目标试次的源空间长图，默认六行：
+#   |quick| 均值（俯视 + 后视）、|slow| 均值（俯视 + 后视）、差值（俯视 + 后视）
+# 从左到右 0-1 s，受试间平均。只看差值用 --no-members（两行）。
 #
 # ── 这一支和 stage 15 / 23 的分工 ────────────────────────────────────────
 #   15  rt-source-contrast：统计 + 单时刻渲染。标签×时间的符号翻转置换检验
@@ -37,9 +38,16 @@
 # 这两个比值与这张图上的百分比**不是同一口径**，不能并列写。潜伏期差（EEG +26 ms、
 # MEG +38 ms）三个读数都不显著，源空间不要写成「quick 的峰更早」。
 #
+# ── 色标 ──────────────────────────────────────────────────────────────────
+# 三组各一根色标，配色与单双侧跟着组的性质走：
+#   |quick| / |slow|：单侧 magma，0 在最下端（与 stage 23 的绝对值图同一套读法）
+#   差值：双向 coolwarm，0 居中（差值要说「谁更大」，零点必须有意义）
+# 所以深浅只能组内比、不能跨组比。--clim-mode shared 会退成一根双向色标，色带含义
+# 统一但成员行只占正半轴。
+#
 # ── 成本 ──────────────────────────────────────────────────────────────────
-# 两模态 × 1 组 × 2 视角 × 11 帧 = 44 次渲染，十几分钟量级；加 --with-members 是
-# 三组六行，翻三倍。本机无 pyvista 只能跑 --dry-run 与 --self-test。
+# 两模态 × 3 组 × 2 视角 × 11 帧 = 132 次渲染，半小时往上；--no-members 减到 44 次。
+# 本机无 pyvista 只能跑 --dry-run 与 --self-test。
 #
 # 产出：output/source-quick-slow/source-quick-slow-{MEG,EEG}.png
 #       output/source-quick-slow/source-quick-slow-{summary,timeline,persubject}.csv
@@ -65,13 +73,13 @@ python $script --dry-run -v "${views[@]}" || {
     exit 1
 }
 echo "---- dry-run 完了，看 output/source-quick-slow/source-quick-slow-*-DRYRUN.png ----"
-echo "---- 日志里每行的 vmax ±xx% 与数据范围决定要不要调 --clim ----------"
+echo "---- 日志里每行的 vmax 与数据范围决定要不要调 --clim ----------"
 
-# 2. 正式出图：两个模态各一张，只画差值（2 行）
+# 2. 正式出图：两个模态各一张，六行（3 组 × 2 视角）
 python $script -v "${views[@]}"
 
-# 3. 想把 quick、slow 各自的幅度也放进来对照（三组六行，渲染时间三倍）
-# python $script -v "${views[@]}" --with-members
+# 3. 只要差值那两行（渲染量减三分之二）
+# python $script -v "${views[@]}" --no-members
 
 # 4. 要与 stage 15 的置换检验对齐（带符号配对差），或要绝对量
 # python $script -v "${views[@]}" --measure diff

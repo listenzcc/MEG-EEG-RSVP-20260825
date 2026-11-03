@@ -3,13 +3,13 @@ File: source-quick-slow.py
 Date: 2026-11-03
 
 Purpose:
-    quick 与 slow 两组目标试次的源空间差值长图：一行一组视角，从左到右 0-1 s，
+    quick 与 slow 两组目标试次的源空间差值长图：一组一个视角、一行，从左到右 0-1 s，
     受试间平均。stage 23 把这两组各画了一行（各看各的），这一支把它们**相减**，
     让差别自己显形——差值在哪一段、落在枕区还是中央区、俯视与后视是否同一个故事。
 
-    同一份数据还能顺手给出两组各自的幅度作为对照行（--with-members），三者用同一个
-    单位（相对该被试参考幅度的百分比），所以「差值 = 两条成员线之差」在逐被试层面
-    严格成立。
+    默认出三组：|quick| 均值、|slow| 均值、两者的差（--no-members 只要差值那组）。
+    三者同一个单位（相对该被试参考幅度的百分比），所以「差值 = 两条成员行之差」
+    在逐被试层面严格成立。给两个视角时就是 3 组 × 2 视角 = 6 行。
 
 Inputs:
     output/source-estimation/{MODE}-{SUBJ}/{epochs}.{tag}-lh.stc（tag 见 -r）
@@ -25,15 +25,18 @@ Outputs:
     output/source-quick-slow/panels-{MODE}/                      --save-panels 时的逐格
 
 Usage:
-    python python/source-quick-slow.py --dry-run -v dor cau
-    python python/source-quick-slow.py -m MEG -v dor cau
-    python python/source-quick-slow.py --with-members -v cau --clim-percent 95
+    python python/source-quick-slow.py --dry-run -v dor cau          # 六行版式
+    python python/source-quick-slow.py -m MEG -v dor cau             # 正式出图
+    python python/source-quick-slow.py --no-members -v cau           # 只要差值两行
     python python/source-quick-slow.py --measure diff --normalize none --data-scale 1e15
     python python/source-quick-slow.py --self-test -v dor cau
 
 Notes:
-    - **差值必然是双向色标**。这一支与 stage 23 不同：stage 23 只看幅度，单侧 magma；
-      这里要说「谁更大」，零点必须有意义，所以默认 coolwarm、以 0 为中心对称。
+    - **色标按组的性质分开**。|quick| / |slow| 两行全正，走单侧 magma、0 在最下端
+      （与 stage 23 的绝对值图同一套读法）；差值行有正有负，走双向 coolwarm、0 居中
+      ——差值要说「谁更大」，零点必须有意义。三组各有一根色标，颜色含义以自己那根
+      为准，不跨组读。
+    - 例外：--clim-mode shared 时全图只有一根色标，一律按双向画（共用尺必须对称）。
     - 默认 --measure absdiff：逐被试算 |quick| − |slow| 再跨被试平均。源估计取的是
       皮层法向分量，同一块源在两组的符号可以相反，先取绝对值再相减不会把翻号读成
       减小。要复现 stage 15 的带符号配对差（那是置换检验用的量），用 --measure diff。
@@ -49,8 +52,8 @@ Notes:
       这一支的百分比是「相对参考幅度」，与那两个比值不同口径，不能并列。
     - 渲染走 stc.plot，需要 3D 后端（pyvista）；无显示器的机器用 xvfb-run -a。
     - 图内文字用英文，避免服务器缺中文字体。
-    - 两模态 × 一组差值 × 两视角 × 11 帧 = 44 次渲染，十几分钟量级；--with-members
-      翻三倍。
+    - 渲染量：两模态 × 三组 × 两视角 × 11 帧 = 132 次重建，半小时往上。--no-members
+      减到 44 次。赶时间就先 -m MEG，或 --render-mode reuse（快，但会自查相邻帧）。
 """
 
 
@@ -123,8 +126,14 @@ parser.add_argument('--data-scale', type=float, default=1.0,
                     help='--normalize none 时乘这个数，只影响色标刻度与数字')
 parser.add_argument('--unit', default=None,
                     help='色标标题里的单位，默认 normalize=ref 时是 %%，否则空')
-parser.add_argument('--with-members', action='store_true',
-                    help='除差值外再画 quick、slow 各自的幅度（三组 × 视角，行数三倍）')
+parser.add_argument('--members', dest='members', action='store_true',
+                    default=True,
+                    help='画 |quick|、|slow| 与两者的差，三组 × 视角（默认，两视角即六行）')
+parser.add_argument('--no-members', '--diff-only', dest='members',
+                    action='store_false',
+                    help='只画差值那组（两视角即两行）')
+parser.add_argument('--with-members', dest='members', action='store_true',
+                    help='--members 的别名')
 
 # 时间轴
 parser.add_argument('--start', type=float, default=0.0, help='时间网格起点（s）')
@@ -155,8 +164,12 @@ parser.add_argument('--clim-mode', default='row', choices=['row', 'shared'],
                          'shared：全图一根')
 parser.add_argument('--colorbar', default='auto', choices=['auto', 'row', 'shared', 'none'])
 parser.add_argument('--colormap', default=None,
-                    help='配色，默认 coolwarm（差值必须双向）。想要 stage 23 的单侧'
-                         'magma 配 --with-members 的成员行也能对上，但差值行会读不出正负')
+                    help='给两组都用这个配色，覆盖下面两个')
+parser.add_argument('--colormap-members', default='magma',
+                    help='|quick| / |slow| 两行的配色，默认 magma（单侧，与 stage 23 '
+                         '的绝对值图同一套读法）')
+parser.add_argument('--colormap-diff', default='coolwarm',
+                    help='差值行的配色，默认 coolwarm（双向，0 居中）')
 
 # 渲染
 parser.add_argument('--panel-size', type=int, nargs=2, default=[700, 330],
@@ -232,8 +245,9 @@ if not VIEWS:
     raise SystemExit('--view 没给视角')
 VIEW_TAGS = [VIEW_NAMES[v] for v in VIEWS]
 
-# 差值必须双向，配色默认 coolwarm；给了 --colormap 就听用户的
-CMAP = args.colormap or 'coolwarm'
+# 差值双向、成员单侧，两套配色各走各的；给了 --colormap 就两组都用同一个
+CMAP_DIFF = args.colormap or args.colormap_diff or 'coolwarm'
+CMAP_MEMBER = args.colormap or args.colormap_members or 'magma'
 SUBJECTS_DIR = None
 _MEASURE_FIG = {}
 
@@ -379,11 +393,13 @@ def build_rows(members, refs):
         diff = {k: members['quick'][k] - members['slow'][k] for k in keys}
 
     rows = []
-    if args.with_members:
+    if args.members:
         for name in ('quick', 'slow'):
             rows.append(dict(
                 label=f'{name}\n|s| mean',
                 note_name=name,
+                one_sided=True,          # 幅度全正，色标从 0 起
+                cmap=CMAP_MEMBER,
                 data=np.mean([norm_block(np.abs(members[name][k]), refs[k])
                               for k in keys], axis=0)))
 
@@ -391,6 +407,8 @@ def build_rows(members, refs):
         label='quick - slow\n' + ('abs diff' if args.measure == 'absdiff'
                                  else 'signed diff'),
         note_name='diff',
+        one_sided=False,         # 有正有负，0 必须居中
+        cmap=CMAP_DIFF,
         data=np.mean([norm_block(diff[k], refs[k]) for k in keys], axis=0)))
     return rows, keys, diff
 
@@ -416,17 +434,19 @@ def pick_vmax(frames):
     return vmax
 
 
-def clim_dict(vmax):
+def clim_dict(vmax, one_sided=False):
     '''
-    色标一定以 0 为中心。
+    色标：成员行单侧，差值行双向。
 
-    差值要表达「谁更大」，零点必须有意义，单侧写法会把负的一侧压成一片同色。成员行
-    （|s| 均值）其实全正，这里也照双向走：同一张图里两套色标如果一单一双，coolwarm
-    的颜色含义就变了（成员行的 0 会跑到色带最左端），读者会把「蓝」读成两组不同的
-    意思。代价是成员行只用到色带的正半轴，可接受。
+    差值要表达「谁更大」，零点必须有意义，单侧的 pos_lims 会把负的一侧压成一片同色。
+    成员行（|s| 均值）全正，反过来该用单侧——双向的话它只占色带的上半，0 落在色带
+    中段而不是最下端，深浅就浪费了一半。两组各有一根色标，颜色含义以自己那根为准，
+    不跨组读。
     '''
     if not vmax or vmax <= 0:
         return 'auto'
+    if one_sided:
+        return dict(kind='value', pos_lims=[0., vmax / 2., vmax])
     return dict(kind='value', lims=[-vmax, 0., vmax])
 
 
@@ -487,17 +507,17 @@ def text_width_in(text, fontsize):
     return widest / fig.dpi
 
 
-def draw_bar(fig, cax, vmax, cmap, fontsize, unit=''):
+def draw_bar(fig, cax, vmax, cmap, fontsize, unit='', one_sided=False):
     '''
-    画一根双向色标条。
+    画一根色标条：成员行单侧（0 在底），差值行双向（0 居中）。
 
     刻度标两端与零点，写成科学计数法——MNE 逆解是 1e-14 量级，默认的
     「1e-15 偏移 + 5/0/-5」读不出量级；归一化之后是百分比，同一段代码照样能标。
     '''
-    norm = Normalize(vmin=-vmax, vmax=vmax)
-    fig.colorbar(ScalarMappable(norm=norm, cmap=cmap), cax=cax,
-                 orientation='vertical')
-    cax.set_yticks([-vmax, 0., vmax])
+    lo = 0. if one_sided else -vmax
+    fig.colorbar(ScalarMappable(norm=Normalize(vmin=lo, vmax=vmax), cmap=cmap),
+                 cax=cax, orientation='vertical')
+    cax.set_yticks([0., vmax] if one_sided else [-vmax, 0., vmax])
     cax.yaxis.set_major_formatter(
         mticker.FuncFormatter(lambda x, _: f'{x:.2g}'))
     cax.tick_params(labelsize=fontsize, length=2)
@@ -575,7 +595,7 @@ def assemble(mode, panels, times, labels, notes, bars, cmap, fname,
         # 右边留白按最长的刻度文字实测，写死会被右边界切掉最后一位
         vals = [b['vmax'] for b in bars if b.get('vmax')] or [0.]
         texts = [f'{v:.2g}' for v in vals] + [f'{v / 2:.2g}' for v in vals] \
-            + ['0', UNIT]
+            + [f'{-v:.2g}' for v in vals] + ['0', UNIT]
         widest = max(text_width_in(t, fs_bar) for t in texts)
         right = 0.12 + bar_w + 0.08 + widest + 0.26
 
@@ -614,13 +634,18 @@ def assemble(mode, panels, times, labels, notes, bars, cmap, fname,
                      ha='right', va='center', fontsize=fs_note, color='0.35')
 
         if cbar_mode == 'row' and bars[r].get('vmax') and bars[r].get('show', True):
-            # 同一组的几个视角共用一根色标：bar 落在第一行上，span 覆盖它们
+            # 同一组的几个视角共用一根色标：bar 落在第一行上，span 覆盖它们。
+            # 配色与单双侧跟着这一组走：成员行 magma 单侧、差值行 coolwarm 双向。
             span = int(bars[r].get('span', 1))
             base = row_y(r + span - 1)
             cax = fig.add_axes([(left + n_cols * col_w + 0.12) / W,
                                 base + span * row_h / H * 0.12,
                                 bar_w / W, span * row_h / H * 0.76])
-            draw_bar(fig, cax, bars[r]['vmax'], cmap, fs_bar, UNIT)
+            draw_bar(fig, cax, bars[r]['vmax'],
+                     plt.get_cmap(bars[r].get('cmap', cmap))
+                     if isinstance(bars[r].get('cmap', cmap), str)
+                     else bars[r].get('cmap', cmap),
+                     fs_bar, UNIT, one_sided=bars[r].get('one_sided', False))
 
     if groups:
         # 组标签与量级写在组的中线上，右对齐到「视角名那一列的左边」
@@ -634,10 +659,11 @@ def assemble(mode, panels, times, labels, notes, bars, cmap, fname,
                          va='top', fontsize=fs_note, color='0.35')
 
     if cbar_mode == 'shared' and bars[0]['vmax']:
+        # 共用尺一律双向：成员行与差值行量级不同，共用时不可能再保一单一双
         cax = fig.add_axes([(left + n_cols * col_w + 0.12) / W,
                             (H - top - n_rows * row_h + 0.12) / H,
                             bar_w / W, (n_rows * row_h - 0.24) / H])
-        draw_bar(fig, cax, bars[0]['vmax'], cmap, fs_bar, UNIT)
+        draw_bar(fig, cax, bars[0]['vmax'], cmap, fs_bar, UNIT, one_sided=False)
 
     title = args.title or f'{mode} quick - slow source contrast'
     fig.text(0.5, (H - 0.10) / H, title, ha='center', va='top', fontsize=fs_title)
@@ -668,15 +694,17 @@ def check_backend():
     return backend
 
 
-def make_brain(stc, clim, t0, view):
+def make_brain(stc, clim, t0, view, cmap):
     '''
     建一个脑图窗口用来截屏。
 
     标题留空：每格的时刻标在拼图时写；colorbar 关掉，色标统一在拼图里画。
+    colormap 跟着这一组走（成员行 magma 单侧、差值行 coolwarm 双向），必须与拼图里
+    那根色标用同一个，否则同一张图上色带与图例对不上。
     '''
     return stc.plot(subject='fsaverage', subjects_dir=SUBJECTS_DIR,
                     hemi=args.hemi, views=[view], initial_time=float(t0),
-                    time_viewer=False, clim=clim, colormap=CMAP,
+                    time_viewer=False, clim=clim, colormap=cmap,
                     colorbar=False, size=tuple(args.panel_size),
                     background='white', foreground='black',
                     cortex=args.cortex,
@@ -685,7 +713,7 @@ def make_brain(stc, clim, t0, view):
                     brain_kwargs=dict(show=False))
 
 
-def render_row(stc, clim, times, render_mode, view):
+def render_row(stc, clim, times, render_mode, view, cmap):
     '''
     渲染一行的所有帧。
 
@@ -696,13 +724,13 @@ def render_row(stc, clim, times, render_mode, view):
     if render_mode == 'rebuild':
         images = []
         for t in times:
-            brain = make_brain(stc, clim, t, view)
+            brain = make_brain(stc, clim, t, view, cmap)
             images.append(np.asarray(brain.screenshot(mode='rgb')))
             brain.close()
         return images
 
     images = []
-    brain = make_brain(stc, clim, times[0], view)
+    brain = make_brain(stc, clim, times[0], view, cmap)
     try:
         for t in times:
             brain.set_time(float(t))
@@ -715,7 +743,7 @@ def render_row(stc, clim, times, render_mode, view):
     if same:
         logger.warning(f'reuse 下有 {same}/{len(images) - 1} 对相邻帧完全相同，'
                        '重绘链没生效，这一行改用 rebuild 重截')
-        return render_row(stc, clim, times, 'rebuild', view)
+        return render_row(stc, clim, times, 'rebuild', view, cmap)
     return images
 
 
@@ -730,10 +758,12 @@ def run_self_test():
     '''
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     times = [round(i * 0.1, 3) for i in range(11)]
-    vmaxes = [40.0, 25.0, 12.0] if args.with_members else [40.0]
-    labels = (['quick\nabs', 'slow\nabs'] if args.with_members else []) \
+    vmaxes = [40.0, 25.0, 12.0] if args.members else [40.0]
+    labels = (['quick\nabs', 'slow\nabs'] if args.members else []) \
         + ['quick - slow\nabs diff']
     notes = [f'N=10 · max {v:.3g}{UNIT}' for v in vmaxes]
+    # 与主流程一致：前几组单侧 magma，最后一组（差值）双向 coolwarm
+    kinds = [(True, CMAP_MEMBER)] * (len(vmaxes) - 1) + [(False, CMAP_DIFF)]
 
     panels = []
     rr, cc = np.ogrid[:110, :240]
@@ -757,11 +787,13 @@ def run_self_test():
     groups = []
     for i, v in enumerate(vmaxes):
         note = row_note(10, v, v / vmaxes[0], is_first=(i == 0))
+        one_sided, cmap = kinds[i]
         for j, view in enumerate(VIEWS):
             labels_out.append(labels[i])
             notes_out.append(note)
             tags_out.append(VIEW_NAMES[view] if multi else '')
-            bars_out.append(dict(vmax=v, span=len(VIEWS), show=(j == 0)))
+            bars_out.append(dict(vmax=v, span=len(VIEWS), show=(j == 0),
+                                 cmap=cmap, one_sided=one_sided))
         groups.append(dict(start=i * len(VIEWS), span=len(VIEWS),
                            label=labels[i], note=note))
 
@@ -772,12 +804,14 @@ def run_self_test():
     panels = [cropped[r * n:(r + 1) * n] for r in range(n_rows)]
 
     assemble('SELF', panels, times, labels_out, notes_out, bars_out,
-             plt.get_cmap(CMAP), OUTPUT_DIR / 'source-quick-slow-SELF-TEST.png',
+             plt.get_cmap(CMAP_DIFF),
+             OUTPUT_DIR / 'source-quick-slow-SELF-TEST.png',
              subtitle=f'self test | {args.measure} / {args.normalize}',
              tags=tags_out, groups=groups if multi else None)
-    logger.info(f'clim 一定是双向的：{clim_dict(vmaxes[0])}')
-    logger.info(f'colormap: {CMAP}, colorbar: {args.colorbar}, '
-                f'mode: {args.clim_mode}')
+    logger.info(f'成员行（单侧）：{clim_dict(vmaxes[0], True)}')
+    logger.info(f'差值行（双向）：{clim_dict(vmaxes[-1], False)}')
+    logger.info(f'colormap: {CMAP_MEMBER} / {CMAP_DIFF}, '
+                f'colorbar: {args.colorbar}, mode: {args.clim_mode}')
 
 
 # %% ---- 2026-11-03 ------------------------
@@ -822,9 +856,12 @@ def main():
 
         if args.clim_mode == 'shared':
             shared = pick_vmax([r['data'][:, idx] for r in rows])
-            logger.info(f'{mode} 全图共用一个 vmax = ±{shared:.4g}{UNIT}')
+            logger.info(f'{mode} 全图共用一个 vmax = ±{shared:.4g}{UNIT}'
+                        '（共用尺只能双向，成员行也按双向画）')
             for r in rows:
                 r['vmax_used'] = shared
+                r['one_sided'] = False
+                r['cmap'] = CMAP_DIFF
         else:
             for r in rows:
                 r['vmax_used'] = r['vmax_own']
@@ -832,9 +869,10 @@ def main():
         first = rows[0]['vmax_used'] or np.nan
         for i, r in enumerate(rows):
             r['ratio'] = r['vmax_used'] / first
+            sign = '' if r['one_sided'] else '±'
             logger.info(f'{mode} row {i + 1} '
                         f'{r["label"].replace(chr(10), "/")}: '
-                        f'{len(keys)} 被试, vmax ±{r["vmax_used"]:.4g}{UNIT}, '
+                        f'{len(keys)} 被试, vmax {sign}{r["vmax_used"]:.4g}{UNIT}, '
                         f'{r["ratio"]:.2f}x row1, 数据范围 '
                         f'[{r["data_min"]:.4g}, {r["data_max"]:.4g}]')
 
@@ -863,14 +901,15 @@ def main():
             stc = template.copy()
             stc.data = r['data']
             stc.subject = 'fsaverage'
-            clim = clim_dict(r['vmax_used'])
+            clim = clim_dict(r['vmax_used'], r['one_sided'])
 
             note = row_note(len(keys), r['vmax_used'], r['ratio'], is_first=(i == 0))
             labels_out.append(r['label'])
             notes_out.append(note)
             tags_out.append(VIEW_NAMES[view] if multi else '')
             bars_out.append(dict(vmax=r['vmax_used'], span=len(VIEWS),
-                                 show=(view == VIEWS[0])))
+                                 show=(view == VIEWS[0]), cmap=r['cmap'],
+                                 one_sided=r['one_sided']))
             if view == VIEWS[0]:
                 groups.append(dict(start=k, span=len(VIEWS),
                                    label=r['label'], note=note))
@@ -894,7 +933,8 @@ def main():
                 if np.isfinite(r['ratio']) else '',
                 data_min=f'{r["data_min"]:.6g}',
                 data_max=f'{r["data_max"]:.6g}',
-                clim_mode=args.clim_mode, colormap=CMAP))
+                one_sided=r['one_sided'],
+                clim_mode=args.clim_mode, colormap=r['cmap']))
 
             if args.dry_run:
                 # 浅灰占位格，只验版式：行标签、时刻、色标位置都能先看一眼
@@ -905,7 +945,8 @@ def main():
                 panels.append([blank.copy() for _ in times])
                 continue
 
-            imgs = render_row(stc, clim, times, args.render_mode, view)
+            imgs = render_row(stc, clim, times, args.render_mode, view,
+                              r['cmap'])
             panels.append(imgs)
             if args.save_panels:
                 folder = OUTPUT_DIR / f'panels-{mode}'
@@ -914,23 +955,8 @@ def main():
                     plt.imsave(folder / f'row{k + 1}-{VIEW_NAMES[view]}-'
                                         f'{t:.3f}s.png', im)
 
-            summary.append(dict(
-                mode=mode, row=k + 1, name=r['note_name'],
-                label=r['label'].replace('\n', ' '),
-                view=VIEW_NAMES[view], epochs_fname=args.epochs,
-                tags=' '.join(TAGS), n_subjects=len(keys),
-                subjects=' '.join(keys), measure=args.measure,
-                normalize=args.normalize, hemi=args.hemi,
-                times=' '.join(f'{t:.3f}' for t in times),
-                vmax=f'{r["vmax_used"]:.6g}',
-                vmax_vs_row1=f'{r["ratio"]:.4f}'
-                if np.isfinite(r['ratio']) else '',
-                data_min=f'{r["data_min"]:.6g}',
-                data_max=f'{r["data_max"]:.6g}',
-                clim_mode=args.clim_mode, colormap=CMAP))
-
         # 逐被试读数单独一张表：参考幅度、差值分位、正差顶点占比
-        if args.with_members and args.measure == 'absdiff':
+        if args.members and args.measure == 'absdiff':
             # 成员行之差应严格等于差值行（同一个分母、逐被试线性），出偏就是算错了
             gap = float(np.max(np.abs(rows[-1]['data']
                                       - (rows[0]['data'] - rows[1]['data']))))
@@ -954,7 +980,7 @@ def main():
 
         suffix = '-DRYRUN' if args.dry_run else ''
         assemble(mode, panels, times, labels_out, notes_out, bars_out,
-                 plt.get_cmap(CMAP),
+                 plt.get_cmap(CMAP_DIFF),
                  OUTPUT_DIR / f'source-quick-slow-{mode}{suffix}.png',
                  tags=tags_out, groups=groups if multi else None)
         if args.dry_run:

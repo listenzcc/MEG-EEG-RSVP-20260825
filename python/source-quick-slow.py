@@ -18,15 +18,24 @@ Inputs:
     stage 15 的 ave-quick / ave-slow（不带 sharedcov）是各自协方差，只有明确要
     复现那一路读数时才用。
 
+    **数据源默认是投影前（epochs-1-notch-epo.fif），不是 rma 之后。** 24 要画的是
+    运动本体长什么样、quick 与 slow 差在哪，投影后运动子空间被挖掉，正好是要看的东西
+    被去掉了。stage 16 对两份 epochs 各跑了一遍、同一个逆算子、同一个 tag 后缀，所以
+    加 --after-projection 就切到投影后那份，tag 不用改。
+
 Outputs:
-    output/source-quick-slow/source-quick-slow-{MODE}.png        长图
-    output/source-quick-slow/source-quick-slow-summary.csv       逐被试读数
-    output/source-quick-slow/source-quick-slow-timeline.csv      逐时刻差值曲线
-    output/source-quick-slow/panels-{MODE}/                      --save-panels 时的逐格
+    投影前（stage 24，默认）→ 前缀 source-quick-slow
+    投影后（stage 25，--after-projection）→ 前缀 source-quick-slow-rma
+        output/{输出目录}/{STEM}-{MODE}.png        长图
+        output/{输出目录}/{STEM}-summary.csv       逐行读数（vmax、数据范围、色标口径）
+        output/{输出目录}/{STEM}-timeline.csv      逐时刻差值曲线
+        output/{输出目录}/{STEM}-persubject.csv    逐被试参考幅度与差值分位
+        output/{输出目录}/panels-{MODE}/           --save-panels 时的逐格
 
 Usage:
     python python/source-quick-slow.py --dry-run -v dor cau          # 六行版式
-    python python/source-quick-slow.py -m MEG -v dor cau             # 正式出图
+    python python/source-quick-slow.py -m MEG -v dor cau             # 正式出图（投影前）
+    python python/source-quick-slow.py --after-projection -v dor cau  # 投影后（stage 25）
     python python/source-quick-slow.py --no-members -v cau           # 只要差值两行
     python python/source-quick-slow.py --measure diff --normalize none --data-scale 1e15
     python python/source-quick-slow.py --self-test -v dor cau
@@ -47,6 +56,9 @@ Notes:
       的跨被试离散度小得多，summary 里两种都给了。
     - 与 stage 15 的分工：15 出统计（标签×时间的符号翻转置换，两模态都没过 FDR）与
       单时刻渲染；这一支出 0-1 s 的连续图像。**图不替代统计**，正文引用显著性仍回 15。
+    - **注意 15 与 24 的数据源不同**：15 的置换检验跑在投影后（removal-artificial）
+      且各自协方差，24 默认跑在投影前、共用逆算子。图和 p 值因此不是同一份数据，
+      不能写成「图上这块差就是 15 检验的那个量」。要对齐就加 --after-projection。
     - 幅度口径别混：传感器水平 EEG quick/slow = 1.377（9/10，p = 0.0098，稳健）、
       MEG = 1.243（9/10，p = 0.0098；剔除试次不平衡者后 5/6、p = 0.156，不稳健）。
       这一支的百分比是「相对参考幅度」，与那两个比值不同口径，不能并列。
@@ -103,8 +115,15 @@ parser.add_argument('-r', '--tags', nargs='+',
                     default=['ave-quick-sharedcov', 'ave-slow-sharedcov'],
                     help='两个 tag，顺序是 quick slow。默认 stage 16 的 sharedcov 版'
                          '（两组共用同一个逆算子）')
-parser.add_argument('--epochs', default='epochs-1-notch-epo.fif',
-                    help='读哪个 epochs 文件的 stc，默认 target 条件')
+parser.add_argument('--epochs', default=None,
+                    help='读哪个 epochs 文件的 stc。不给就按 --after-projection 定：'
+                         '默认 epochs-1-notch-epo.fif（投影前），加开关则是 '
+                         'epochs-1-notch-removal-artificial-epo.fif（投影后）。'
+                         '这个参数优先于开关')
+parser.add_argument('--after-projection', '--rma', dest='after_projection',
+                    action='store_true',
+                    help='读投影后（remove artificial / rma）那一份 stc，而不是默认的'
+                         '投影前。看的是「投影之后 quick/slow 还剩什么」，不再是运动本体')
 parser.add_argument('-d', '--stc-dir', default='output/source-estimation',
                     help='stc 所在目录，默认 output/source-estimation')
 parser.add_argument('-m', '--modes', nargs='+', default=['MEG', 'EEG'],
@@ -198,6 +217,25 @@ parser.add_argument('--self-test', action='store_true',
                     help='用合成图跑一遍排版与色标，不需要 stc 与 3D 后端')
 
 args = parser.parse_args()
+
+# 数据源：投影前 / 投影后。stage 16 对两份 epochs 各跑了一遍、用同一个逆算子、
+# 同一个 tag 后缀，所以这一个参数就能切换，不用改 tag。
+EPOCHS_PROJ = 'epochs-1-notch-epo.fif'
+EPOCHS_RMA = 'epochs-1-notch-removal-artificial-epo.fif'
+if args.epochs is None:
+    args.epochs = EPOCHS_RMA if args.after_projection else EPOCHS_PROJ
+elif args.after_projection and args.epochs != EPOCHS_RMA:
+    logger.warning(f'--epochs {args.epochs} 与 --after-projection 同时给了，'
+                   f'按 --epochs 走')
+logger.info(f'stc 来源：{args.epochs} '
+            + ('（投影后 / rma：运动子空间已被去掉）' if args.epochs == EPOCHS_RMA
+               else '（投影前：运动本体完整）'))
+
+# 产物名跟着数据源走：投影前叫 source-quick-slow-*，投影后叫 source-quick-slow-rma-*。
+# 即使两支指到同一个输出目录也不会互相覆盖。
+IS_RMA = args.epochs == EPOCHS_RMA
+STEM = 'source-quick-slow-rma' if IS_RMA else 'source-quick-slow'
+SRC_LABEL = 'after projection' if IS_RMA else 'before projection'
 
 DATA_DIR = Path(args.stc_dir)
 OUTPUT_DIR = Path(args.output)
@@ -665,11 +703,13 @@ def assemble(mode, panels, times, labels, notes, bars, cmap, fname,
                             bar_w / W, (n_rows * row_h - 0.24) / H])
         draw_bar(fig, cax, bars[0]['vmax'], cmap, fs_bar, UNIT, one_sided=False)
 
-    title = args.title or f'{mode} quick - slow source contrast'
+    title = args.title or (f'{mode} quick - slow source contrast '
+                           f'({SRC_LABEL})')
     fig.text(0.5, (H - 0.10) / H, title, ha='center', va='top', fontsize=fs_title)
     view_txt = ' + '.join(VIEW_TAGS)
     fig.text(0.5, (H - 0.34) / H,
-             subtitle or (f'{args.measure} / {args.normalize} | view {view_txt} | '
+             subtitle or (f'{args.measure} / {args.normalize} | {SRC_LABEL} | '
+                          f'view {view_txt} | '
                           f'{n_rows} rows x {n_cols} frames | '
                           f'colour scale: {args.clim_mode}'),
              ha='center', va='top', fontsize=fs_sub, color='0.35')
@@ -805,7 +845,7 @@ def run_self_test():
 
     assemble('SELF', panels, times, labels_out, notes_out, bars_out,
              plt.get_cmap(CMAP_DIFF),
-             OUTPUT_DIR / 'source-quick-slow-SELF-TEST.png',
+             OUTPUT_DIR / f'{STEM}-SELF-TEST.png',
              subtitle=f'self test | {args.measure} / {args.normalize}',
              tags=tags_out, groups=groups if multi else None)
     logger.info(f'成员行（单侧）：{clim_dict(vmaxes[0], True)}')
@@ -981,7 +1021,7 @@ def main():
         suffix = '-DRYRUN' if args.dry_run else ''
         assemble(mode, panels, times, labels_out, notes_out, bars_out,
                  plt.get_cmap(CMAP_DIFF),
-                 OUTPUT_DIR / f'source-quick-slow-{mode}{suffix}.png',
+                 OUTPUT_DIR / f'{STEM}-{mode}{suffix}.png',
                  tags=tags_out, groups=groups if multi else None)
         if args.dry_run:
             logger.info(f'{mode} dry-run 到此为止：没有渲染，上面这张是空格的版式图')
@@ -991,17 +1031,17 @@ def main():
         return
     df = pd.DataFrame(summary)
     print(df.head(20).to_string(index=False))
-    fname = OUTPUT_DIR / 'source-quick-slow-summary.csv'
+    fname = OUTPUT_DIR / f'{STEM}-summary.csv'
     df.to_csv(fname, index=False)
     logger.info(f'Saved into {fname}')
     if timeline:
         tf = pd.DataFrame(timeline)
-        tfname = OUTPUT_DIR / 'source-quick-slow-timeline.csv'
+        tfname = OUTPUT_DIR / f'{STEM}-timeline.csv'
         tf.to_csv(tfname, index=False)
         logger.info(f'Saved into {tfname}')
     if persub:
         pf = pd.DataFrame(persub)
-        pfname = OUTPUT_DIR / 'source-quick-slow-persubject.csv'
+        pfname = OUTPUT_DIR / f'{STEM}-persubject.csv'
         pf.to_csv(pfname, index=False)
         logger.info(f'Saved into {pfname}')
 
